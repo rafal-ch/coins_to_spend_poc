@@ -1,5 +1,5 @@
 use rand::seq::SliceRandom;
-use rocksdb::{DBCommon, Options, SingleThreaded, ThreadMode, DB};
+use rocksdb::{Options, DB};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -96,7 +96,7 @@ fn main() {
     let _ = DB::destroy(&options, "simple_db");
 }
 
-fn put_some(db: &DB, /*amount: u64, user: u8, asset: u8*/ o: &Obj) {
+fn put_some(db: &DB, o: &Obj) {
     let key = o.key.clone();
     let data = o.data.clone();
 
