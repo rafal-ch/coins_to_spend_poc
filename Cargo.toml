@@ -10,3 +10,4 @@ postcard = { version = "1.0.10", features = ["alloc"] }
 rand = "0.8.5"
 rocksdb = "0.22.0"
 serde = { version = "1.0.215", features = ["derive"] }
+test-case = "3.3.1"
