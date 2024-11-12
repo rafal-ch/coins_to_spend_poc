@@ -1,6 +1,13 @@
-use rand::seq::SliceRandom;
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+
 use rocksdb::{Options, SliceTransform, DB};
 use serde::{Deserialize, Serialize};
+
+static SUFFIX_PROVIDER: AtomicU64 = AtomicU64::new(0);
+fn get_next_number() -> u64 {
+    // Use fetch_add to atomically increment the counter and return the previous value
+    SUFFIX_PROVIDER.fetch_add(1, Ordering::SeqCst)
+}
 
 #[derive(Debug)]
 struct CoinDef {
@@ -56,7 +63,11 @@ impl CoinsManager {
         // Indexation DB
         let serialized_amount = postcard::to_allocvec(&amount.to_be_bytes()).unwrap();
         let serialized_amount_hex = hex::encode(serialized_amount);
-        let key = format!("{user_as_hex}{asset_as_hex}{serialized_amount_hex}");
+        let suffix = get_next_number() as u64;
+        let serialized_suffix = postcard::to_allocvec(&suffix.to_be_bytes()).unwrap();
+        let serialized_suffix_hex = hex::encode(serialized_suffix);
+        let key =
+            format!("{user_as_hex}{asset_as_hex}{serialized_amount_hex}{serialized_suffix_hex}");
         println!("Indexing: key={key} length={}", key.len());
         self.index_db.put(key, &[]).unwrap();
     }
@@ -78,7 +89,8 @@ impl CoinsManager {
 
                 let user = &full_key[..16];
                 let asset = &full_key[16..32];
-                let amount = &full_key[32..];
+                let amount = &full_key[32..48];
+                let _suffix = &full_key[48..];
 
                 let user_ascii: String = hex::decode(user)
                     .unwrap()
@@ -192,7 +204,6 @@ fn main() {
     // Single coin
     cm.add_coin(5, "Charlie", "BTC");
 
-    /*
     // Two identical coins
     cm.add_coin(6, "Dave", "ETH");
     cm.add_coin(6, "Dave", "ETH");
@@ -203,7 +214,6 @@ fn main() {
 
     // Alice also has 1 BTC, this differs only by user
     cm.add_coin(1, "Frank", "BTC");
-    */
 
     // Many coins and different assets
     cm.add_coin(2, "Grace", "BTC");
@@ -214,11 +224,19 @@ fn main() {
     cm.add_coin(2, "Grace", "ETH");
 
     // Do some retrievals
-    let coins = cm.get_coins("Alice", "BTC");
+    let coins = cm.get_coins("Dave", "ETH");
     dbg!(&coins);
-    let coins = cm.get_coins("Alice", "ETH");
-    dbg!(&coins);
+
     let coins = cm.get_coins("Grace", "ETH");
+    dbg!(&coins);
+
+    let coins = cm.get_coins("Grace", "BTC");
+    dbg!(&coins);
+
+    let coins = cm.get_coins("Charlie", "LCK");
+    dbg!(&coins);
+
+    let coins = cm.get_coins("Bob", "LCK");
     dbg!(&coins);
 
     /*
@@ -256,22 +274,4 @@ fn main() {
         );
     }
     */
-}
-
-fn put_some(db: &DB, o: &Obj) {
-    let key = o.key.clone();
-    let data = o.data.clone();
-
-    let key = Key { amount: key.amount };
-    let data = Data {
-        user: [data.user[0]; 32],
-        asset: [data.asset[0]; 32],
-    };
-
-    // Serialize Key and Data to binary format
-    let serialized_key = postcard::to_allocvec(&key.as_be_bytes()).unwrap();
-    let serialized_data = postcard::to_allocvec(&data).unwrap();
-
-    // Store serialized data in RocksDB
-    db.put(serialized_key, serialized_data).unwrap();
 }
