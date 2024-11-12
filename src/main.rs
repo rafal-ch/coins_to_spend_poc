@@ -10,20 +10,41 @@ fn get_next_number() -> u64 {
 }
 
 #[derive(Debug)]
-struct CoinDef {
+struct CoinIndexDef {
     user: String,
     asset: String,
     amount: u64,
+    main_db_key: Vec<u8>,
 }
 
-impl CoinDef {
-    fn new(user: String, asset: String, amount: u64) -> Self {
+impl CoinIndexDef {
+    fn new(user: String, asset: String, amount: u64, main_db_key: Vec<u8>) -> Self {
         Self {
             user,
             asset,
             amount,
+            main_db_key,
         }
     }
+}
+
+impl core::fmt::Display for CoinIndexDef {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Coin Index {{ user: {}, asset: {}, amount: {}, main_db_key: {:?} }}",
+            self.user,
+            self.asset,
+            self.amount,
+            hex::encode(&self.main_db_key)
+        )
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct CoinDef {
+    amount: u64,
+    metadata: String,
 }
 
 struct CoinsManager {
@@ -52,13 +73,20 @@ impl CoinsManager {
     ) {
         let user_as_hex = normalize_string(user.clone());
         let asset_as_hex = normalize_string(asset.clone());
+        let nonce = normalize_string(rand::random::<u64>().to_string());
 
         println!("Adding: user={user}, asset={asset}, amount={amount}");
 
         // Main DB
-        let key = format!("{user_as_hex}{asset_as_hex}");
-        let serialized_amount = postcard::to_allocvec(&amount).unwrap();
-        self.main_db.put(key, serialized_amount).unwrap();
+        let main_key = format!("{user_as_hex}{asset_as_hex}{nonce}");
+        let metadata = CoinDef {
+            amount,
+            metadata: format!("Some additional info about the coin from main_db. For example, a random number: {}", rand::random::<u64>()),
+        };
+        let serialized_metadata = postcard::to_allocvec(&metadata).unwrap();
+        self.main_db
+            .put(main_key.clone(), serialized_metadata)
+            .unwrap();
 
         // Indexation DB
         let serialized_amount = postcard::to_allocvec(&amount.to_be_bytes()).unwrap();
@@ -69,14 +97,14 @@ impl CoinsManager {
         let key =
             format!("{user_as_hex}{asset_as_hex}{serialized_amount_hex}{serialized_suffix_hex}");
         println!("Indexing: key={key} length={}", key.len());
-        self.index_db.put(key, &[]).unwrap();
+        self.index_db.put(key, main_key).unwrap();
     }
 
     fn get_coins(
         &self,
         user: impl ToString + core::fmt::Display + Clone,
         asset: impl ToString + core::fmt::Display + Clone,
-    ) -> Vec<CoinDef> {
+    ) -> Vec<CoinIndexDef> {
         let user_as_hex = normalize_string(user.clone());
         let asset_as_hex = normalize_string(asset.clone());
 
@@ -85,7 +113,7 @@ impl CoinsManager {
         self.index_db
             .prefix_iterator(prefix)
             .map(|entry| {
-                let full_key = entry.unwrap().0;
+                let (full_key, main_db_key) = entry.unwrap();
 
                 let user = &full_key[..16];
                 let asset = &full_key[16..32];
@@ -106,7 +134,7 @@ impl CoinsManager {
 
                 let amount = u64::from_be_bytes(hex::decode(amount).unwrap().try_into().unwrap());
 
-                CoinDef::new(user_ascii, asset_ascii, amount)
+                CoinIndexDef::new(user_ascii, asset_ascii, amount, main_db_key.to_vec())
             })
             .collect()
     }
@@ -225,19 +253,19 @@ fn main() {
 
     // Do some retrievals
     let coins = cm.get_coins("Dave", "ETH");
-    dbg!(&coins);
+    dump_coins(&cm.main_db, &coins);
 
     let coins = cm.get_coins("Grace", "ETH");
-    dbg!(&coins);
+    dump_coins(&cm.main_db, &coins);
 
     let coins = cm.get_coins("Grace", "BTC");
-    dbg!(&coins);
+    dump_coins(&cm.main_db, &coins);
 
     let coins = cm.get_coins("Charlie", "LCK");
-    dbg!(&coins);
+    dump_coins(&cm.main_db, &coins);
 
     let coins = cm.get_coins("Bob", "LCK");
-    dbg!(&coins);
+    dump_coins(&cm.main_db, &coins);
 
     /*
     let mut random_amounts = std::iter::repeat_with(rand::random::<u64>)
@@ -274,4 +302,16 @@ fn main() {
         );
     }
     */
+}
+
+fn dump_coins(main_db: &DB, coins: &[CoinIndexDef]) {
+    println!("\tCoins Index:");
+    for coin in coins {
+        let main_db_key = coin.main_db_key.clone();
+        let serialized_metadata = main_db.get(&main_db_key).unwrap().unwrap();
+        let deserialized_metadata: CoinDef = postcard::from_bytes(&serialized_metadata).unwrap();
+
+        println!("\t\t{}", coin);
+        println!("\t\t\tMetadata: {:?}", deserialized_metadata);
+    }
 }
