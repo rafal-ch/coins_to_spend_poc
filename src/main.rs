@@ -217,7 +217,6 @@ impl CoinsManager {
                     .cloned()
                     .collect();
 
-                //dbg!(&selected_coins);
                 if value_accumulated >= *amount && coins_taken <= max {
                     selected_coins
                 } else {
