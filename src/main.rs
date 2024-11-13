@@ -529,113 +529,179 @@ mod tests {
             expected_coins: &'static [Coin],
         }
 
-        const SINGLE_ASSET_MULTIPLE_COINS_WITHOUT_EXCLUSION: TestCase = TestCase {
-            coins: COIN_DATABASE,
-            owner: "Eve",
-            excluded_utxos: "",
-            query: &["BTC;150;-"],
-            expected_coins: &[("UTXO80", "Eve", "BTC", 100), ("UTXO81", "Eve", "BTC", 75)],
-        };
+        mod without_exclusion_without_limits {
+            use crate::tests::COIN_DATABASE;
 
-        const MULTIPLE_ASSETS_MULTIPLE_COINS_WITHOUT_EXCLUSION: TestCase = TestCase {
-            coins: COIN_DATABASE,
-            owner: "Eve",
-            excluded_utxos: "",
-            query: &["BTC;150;-", "LCK;200;-"],
-            expected_coins: &[
-                ("UTXO80", "Eve", "BTC", 100),
-                ("UTXO81", "Eve", "BTC", 75),
-                ("UTXO90", "Eve", "LCK", 100),
-                ("UTXO91", "Eve", "LCK", 75),
-                ("UTXO92", "Eve", "LCK", 50),
-            ],
-        };
+            use super::TestCase;
 
-        const SINGLE_ASSET_MULTIPLE_COINS_WITH_SINGLE_EXCLUSION: TestCase = TestCase {
-            coins: COIN_DATABASE,
-            owner: "Eve",
-            excluded_utxos: "UTXO80",
-            query: &["BTC;150;-"],
-            expected_coins: &[
-                ("UTXO81", "Eve", "BTC", 75),
-                ("UTXO82", "Eve", "BTC", 50),
-                ("UTXO83", "Eve", "BTC", 25),
-            ],
-        };
-
-        const MULTIPLE_ASSETS_MULTIPLE_COINS_WITH_EXCLUSION: TestCase = TestCase {
-            coins: COIN_DATABASE,
-            owner: "Eve",
-            excluded_utxos: "UTXO90;UTXO81",
-            query: &["BTC;150;-", "LCK;101;-"],
-            expected_coins: &[
-                ("UTXO80", "Eve", "BTC", 100),
-                ("UTXO82", "Eve", "BTC", 50),
-                ("UTXO91", "Eve", "LCK", 75),
-                ("UTXO92", "Eve", "LCK", 50),
-            ],
-        };
-
-        const SINGLE_ASSET_MULTIPLE_COINS_WITH_MULTIPLE_EXCLUSIONS: TestCase = TestCase {
-            coins: COIN_DATABASE,
-            owner: "Eve",
-            excluded_utxos: "UTXO80;UTXO81;UTXO82;UTXO83;UTXO84;UTXO85",
-            query: &["BTC;4;-"],
-            expected_coins: &[("UTXO86", "Eve", "BTC", 3), ("UTXO87", "Eve", "BTC", 2)],
-        };
-
-        const CAN_NOT_SATISFY_REQUEST_NOT_ENOUGH_VALUE: TestCase = TestCase {
-            coins: COIN_DATABASE,
-            owner: "Eve",
-            excluded_utxos: "UTXO80;UTXO81;UTXO82;UTXO83;UTXO84;UTXO85",
-            query: &["BTC;1000;-"],
-            expected_coins: &[],
-        };
-
-        const CAN_NOT_SATISFY_REQUEST_NOT_ENOUGH_VALUE_FOR_SINGLE_ASSET: TestCase = TestCase {
-            coins: COIN_DATABASE,
-            owner: "Eve",
-            excluded_utxos: "UTXO90;UTXO81",
-            query: &["BTC;150;-", "LCK;100000;-"],
-            expected_coins: &[("UTXO80", "Eve", "BTC", 100), ("UTXO82", "Eve", "BTC", 50)],
-        };
-
-        const CAN_NOT_SATISFY_REQUEST_NOT_ENOUGH_VALUE_FOR_ANY_OF_MULTIPLE_ASSETS: TestCase =
-            TestCase {
-                coins: COIN_DATABASE,
-                owner: "Eve",
-                excluded_utxos: "UTXO90;UTXO81",
-                query: &["BTC;100000;-", "LCK;100000;-"],
-                expected_coins: &[],
-            };
-
-        const CAN_NOT_SATISFY_REQUEST_COIN_COUNT_LIMIT_SINGLE_ASSET_NO_EXCLUSION: TestCase =
-            TestCase {
+            pub(super) const SINGLE_ASSET: TestCase = TestCase {
                 coins: COIN_DATABASE,
                 owner: "Eve",
                 excluded_utxos: "",
-                query: &["BTC;200;2"],
+                query: &["BTC;150;-"],
+                expected_coins: &[("UTXO80", "Eve", "BTC", 100), ("UTXO81", "Eve", "BTC", 75)],
+            };
+
+            pub(super) const MULTIPLE_ASSETS: TestCase = TestCase {
+                coins: COIN_DATABASE,
+                owner: "Eve",
+                excluded_utxos: "",
+                query: &["BTC;150;-", "LCK;99;-"],
+                expected_coins: &[
+                    ("UTXO80", "Eve", "BTC", 100),
+                    ("UTXO81", "Eve", "BTC", 75),
+                    ("UTXO90", "Eve", "LCK", 100),
+                ],
+            };
+        }
+
+        mod with_exclusion_without_limits {
+            use crate::tests::COIN_DATABASE;
+
+            use super::TestCase;
+
+            pub(super) const SINGLE_EXCLUSION: TestCase = TestCase {
+                coins: COIN_DATABASE,
+                owner: "Eve",
+                excluded_utxos: "UTXO80",
+                query: &["BTC;150;-"],
+                expected_coins: &[
+                    ("UTXO81", "Eve", "BTC", 75),
+                    ("UTXO82", "Eve", "BTC", 50),
+                    ("UTXO83", "Eve", "BTC", 25),
+                ],
+            };
+
+            pub(super) const MULTIPLE_EXCLUSIONS: TestCase = TestCase {
+                coins: COIN_DATABASE,
+                owner: "Eve",
+                excluded_utxos: "UTXO80;UTXO81;UTXO82;UTXO83",
+                query: &["BTC;10;-"],
+                expected_coins: &[
+                    ("UTXO84", "Eve", "BTC", 5),
+                    ("UTXO85", "Eve", "BTC", 4),
+                    ("UTXO86", "Eve", "BTC", 3),
+                ],
+            };
+
+            pub(super) const MULTIPLE_ASSETS: TestCase = TestCase {
+                coins: COIN_DATABASE,
+                owner: "Eve",
+                excluded_utxos: "UTXO90",
+                query: &["BTC;200;-", "LCK;100;-"],
+                expected_coins: &[
+                    ("UTXO80", "Eve", "BTC", 100),
+                    ("UTXO81", "Eve", "BTC", 75),
+                    ("UTXO82", "Eve", "BTC", 50),
+                    ("UTXO91", "Eve", "LCK", 75),
+                    ("UTXO92", "Eve", "LCK", 50),
+                ],
+            };
+        }
+
+        mod without_exclusion_with_limits {
+            use crate::tests::COIN_DATABASE;
+
+            use super::TestCase;
+
+            pub(super) const SINGLE_ASSET_PERFECT_FIT: TestCase = TestCase {
+                coins: COIN_DATABASE,
+                owner: "Eve",
+                excluded_utxos: "",
+                query: &["BTC;225;3"],
+                expected_coins: &[
+                    ("UTXO80", "Eve", "BTC", 100),
+                    ("UTXO81", "Eve", "BTC", 75),
+                    ("UTXO82", "Eve", "BTC", 50),
+                ],
+            };
+
+            pub(super) const SINGLE_ASSET_LACK_SINGLE_COIN: TestCase = TestCase {
+                coins: COIN_DATABASE,
+                owner: "Eve",
+                excluded_utxos: "UTXO80",
+                query: &["BTC;225;2"],
                 expected_coins: &[],
             };
 
-        const CAN_FIT_THE_EXACT_VALUE_AND_COUNT_LIMIT: TestCase = TestCase {
-            coins: COIN_DATABASE,
-            owner: "Eve",
-            excluded_utxos: "",
-            query: &["BTC;175;2"],
-            expected_coins: &[("UTXO80", "Eve", "BTC", 100), ("UTXO81", "Eve", "BTC", 75)],
-        };
+            pub(super) const MULTIPLE_ASSETS_PERFECT_FIT: TestCase = TestCase {
+                coins: COIN_DATABASE,
+                owner: "Eve",
+                excluded_utxos: "",
+                query: &["BTC;225;3", "LCK;250;4"],
+                expected_coins: &[
+                    ("UTXO80", "Eve", "BTC", 100),
+                    ("UTXO81", "Eve", "BTC", 75),
+                    ("UTXO82", "Eve", "BTC", 50),
+                    ("UTXO90", "Eve", "LCK", 100),
+                    ("UTXO91", "Eve", "LCK", 75),
+                    ("UTXO92", "Eve", "LCK", 50),
+                    ("UTXO93", "Eve", "LCK", 25),
+                ],
+            };
 
-        #[test_case(SINGLE_ASSET_MULTIPLE_COINS_WITHOUT_EXCLUSION)]
-        #[test_case(MULTIPLE_ASSETS_MULTIPLE_COINS_WITHOUT_EXCLUSION)]
-        #[test_case(SINGLE_ASSET_MULTIPLE_COINS_WITH_SINGLE_EXCLUSION)]
-        #[test_case(MULTIPLE_ASSETS_MULTIPLE_COINS_WITH_EXCLUSION)]
-        #[test_case(SINGLE_ASSET_MULTIPLE_COINS_WITH_MULTIPLE_EXCLUSIONS)]
-        #[test_case(CAN_NOT_SATISFY_REQUEST_NOT_ENOUGH_VALUE)]
-        #[test_case(CAN_NOT_SATISFY_REQUEST_NOT_ENOUGH_VALUE_FOR_SINGLE_ASSET)]
-        #[test_case(CAN_NOT_SATISFY_REQUEST_NOT_ENOUGH_VALUE_FOR_ANY_OF_MULTIPLE_ASSETS)]
-        #[test_case(CAN_NOT_SATISFY_REQUEST_COIN_COUNT_LIMIT_SINGLE_ASSET_NO_EXCLUSION)]
-        #[test_case(CAN_FIT_THE_EXACT_VALUE_AND_COUNT_LIMIT)]
+            pub(super) const NOT_ALL_ASSETS_LIMITED: TestCase = TestCase {
+                coins: COIN_DATABASE,
+                owner: "Eve",
+                excluded_utxos: "",
+                query: &["BTC;225;2", "LCK;250;-"],
+                expected_coins: &[
+                    ("UTXO90", "Eve", "LCK", 100),
+                    ("UTXO91", "Eve", "LCK", 75),
+                    ("UTXO92", "Eve", "LCK", 50),
+                    ("UTXO93", "Eve", "LCK", 25),
+                ],
+            };
+        }
+
+        mod with_exclusion_with_limits {
+            use crate::tests::COIN_DATABASE;
+
+            use super::TestCase;
+
+            pub(super) const LIMIT_TOO_LOW_ON_ALL_ASSETS: TestCase = TestCase {
+                coins: COIN_DATABASE,
+                owner: "Eve",
+                excluded_utxos: "UTXO80",
+                query: &["BTC;156;3", "LCK;101;1"],
+                expected_coins: &[],
+            };
+
+            pub(super) const LIMIT_TOO_LOW_ON_SINGLE_ASSET_1: TestCase = TestCase {
+                coins: COIN_DATABASE,
+                owner: "Eve",
+                excluded_utxos: "UTXO80",
+                query: &["BTC;156;5", "LCK;101;1"],
+                expected_coins: &[
+                    ("UTXO81", "Eve", "BTC", 75),
+                    ("UTXO82", "Eve", "BTC", 50),
+                    ("UTXO83", "Eve", "BTC", 25),
+                    ("UTXO84", "Eve", "BTC", 5),
+                    ("UTXO85", "Eve", "BTC", 4),
+                ],
+            };
+
+            pub(super) const LIMIT_TOO_LOW_ON_SINGLE_ASSET_2: TestCase = TestCase {
+                coins: COIN_DATABASE,
+                owner: "Eve",
+                excluded_utxos: "UTXO80",
+                query: &["BTC;156;3", "LCK;101;2"],
+                expected_coins: &[("UTXO90", "Eve", "LCK", 100), ("UTXO91", "Eve", "LCK", 75)],
+            };
+        }
+
+        #[test_case(without_exclusion_without_limits::SINGLE_ASSET)]
+        #[test_case(without_exclusion_without_limits::MULTIPLE_ASSETS)]
+        #[test_case(with_exclusion_without_limits::SINGLE_EXCLUSION)]
+        #[test_case(with_exclusion_without_limits::MULTIPLE_EXCLUSIONS)]
+        #[test_case(with_exclusion_without_limits::MULTIPLE_ASSETS)]
+        #[test_case(without_exclusion_with_limits::SINGLE_ASSET_PERFECT_FIT)]
+        #[test_case(without_exclusion_with_limits::SINGLE_ASSET_LACK_SINGLE_COIN)]
+        #[test_case(without_exclusion_with_limits::MULTIPLE_ASSETS_PERFECT_FIT)]
+        #[test_case(without_exclusion_with_limits::NOT_ALL_ASSETS_LIMITED)]
+        #[test_case(with_exclusion_with_limits::LIMIT_TOO_LOW_ON_ALL_ASSETS)]
+        #[test_case(with_exclusion_with_limits::LIMIT_TOO_LOW_ON_SINGLE_ASSET_1)]
+        #[test_case(with_exclusion_with_limits::LIMIT_TOO_LOW_ON_SINGLE_ASSET_2)]
         fn exclude_coin(
             TestCase {
                 coins,
