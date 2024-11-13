@@ -14,33 +14,33 @@ struct CoinIndexDef {
     user: String,
     asset: String,
     amount: u64,
+    utxo_id: String,
     main_db_key: Vec<u8>,
 }
 
 impl PartialEq for CoinIndexDef {
     fn eq(&self, other: &Self) -> bool {
-        self.user == other.user && self.asset == other.asset && self.amount == other.amount
-    }
-}
-
-impl From<&(&str, &str, u64)> for CoinIndexDef {
-    fn from((user, asset, amount): &(&str, &str, u64)) -> Self {
-        Self::new(
-            make_string_exactly_8_chars_long(user.to_string()),
-            make_string_exactly_8_chars_long(asset.to_string()),
-            *amount,
-            vec![],
-        )
+        self.user == other.user
+            && self.asset == other.asset
+            && self.amount == other.amount
+            && self.utxo_id == other.utxo_id
     }
 }
 
 impl CoinIndexDef {
-    fn new(user: String, asset: String, amount: u64, main_db_key: Vec<u8>) -> Self {
+    fn new(
+        user: String,
+        asset: String,
+        amount: u64,
+        main_db_key: Vec<u8>,
+        utxo_id: String,
+    ) -> Self {
         Self {
             user,
             asset,
             amount,
             main_db_key,
+            utxo_id,
         }
     }
 }
@@ -61,6 +61,7 @@ impl core::fmt::Display for CoinIndexDef {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct CoinDef {
     amount: u64,
+    utxo_id: String,
     metadata: String,
 }
 
@@ -82,10 +83,11 @@ impl CoinsManager {
         Self { main_db, index_db }
     }
 
-    fn add_coin(
+    fn add_coin<S: ToString + core::fmt::Display + Clone>(
         &self,
-        user: impl ToString + core::fmt::Display + Clone,
-        asset: impl ToString + core::fmt::Display + Clone,
+        utxo_id: S,
+        user: S,
+        asset: S,
         amount: u64,
     ) {
         let user_as_hex = normalize_string(user.clone());
@@ -94,11 +96,18 @@ impl CoinsManager {
 
         // println!("Adding: user={user}, asset={asset}, amount={amount}");
 
+        // IMPORTANT: Both of these writes must happen in the same transaction!
+
         // Main DB
         let main_key = format!("{user_as_hex}{asset_as_hex}{nonce}");
         let metadata = CoinDef {
             amount,
-            metadata: format!("Some additional info about the coin from main_db. For example, a random number: {}", rand::random::<u64>()),
+            metadata: format!(
+                "Metadata: utxo_id={}, nonce={}",
+                utxo_id,
+                rand::random::<u64>()
+            ),
+            utxo_id: utxo_id.to_string(),
         };
         let serialized_metadata = postcard::to_allocvec(&metadata).unwrap();
         self.main_db
@@ -108,52 +117,68 @@ impl CoinsManager {
         // Indexation DB
         let serialized_amount = postcard::to_allocvec(&amount.to_be_bytes()).unwrap();
         let serialized_amount_hex = hex::encode(serialized_amount);
-        let suffix = get_next_number() as u64;
-        let serialized_suffix = postcard::to_allocvec(&suffix.to_be_bytes()).unwrap();
-        let serialized_suffix_hex = hex::encode(serialized_suffix);
-        let key =
-            format!("{user_as_hex}{asset_as_hex}{serialized_amount_hex}{serialized_suffix_hex}");
+        //let suffix = get_next_number() as u64;
+        let suffix = utxo_id.to_string();
+        let key = format!("{user_as_hex}{asset_as_hex}{serialized_amount_hex}{suffix}");
         //println!("Indexing: key={key} length={}", key.len());
         self.index_db.put(key, main_key).unwrap();
     }
 
-    fn get_coins(
-        &self,
-        user: impl ToString + core::fmt::Display + Clone,
-        asset: impl ToString + core::fmt::Display + Clone,
-    ) -> Vec<CoinIndexDef> {
+    fn iter<S>(&self, user: S, asset: S) -> impl Iterator<Item = CoinIndexDef> + '_
+    where
+        S: ToString + core::fmt::Display + Clone,
+    {
         let user_as_hex = normalize_string(user.clone());
         let asset_as_hex = normalize_string(asset.clone());
 
         let prefix = format!("{user_as_hex}{asset_as_hex}");
         //println!("Reading: user={user}, asset={asset} --> prefix={prefix}");
-        self.index_db
-            .prefix_iterator(prefix)
-            .map(|entry| {
-                let (full_key, main_db_key) = entry.unwrap();
+        self.index_db.prefix_iterator(prefix).map(|entry| {
+            let (full_key, main_db_key) = entry.unwrap();
 
-                let user = &full_key[..16];
-                let asset = &full_key[16..32];
-                let amount = &full_key[32..48];
-                let _suffix = &full_key[48..];
+            let user = &full_key[..16];
+            let asset = &full_key[16..32];
+            let amount = &full_key[32..48];
+            let utxo_id = &full_key[48..];
 
-                let user_ascii: String = hex::decode(user)
-                    .unwrap()
-                    .iter()
-                    .map(|b| *b as char)
-                    .collect();
+            let user_ascii: String = hex::decode(user)
+                .unwrap()
+                .iter()
+                .map(|b| *b as char)
+                .collect();
 
-                let asset_ascii: String = hex::decode(asset)
-                    .unwrap()
-                    .iter()
-                    .map(|b| *b as char)
-                    .collect();
+            let asset_ascii: String = hex::decode(asset)
+                .unwrap()
+                .iter()
+                .map(|b| *b as char)
+                .collect();
 
-                let amount = u64::from_be_bytes(hex::decode(amount).unwrap().try_into().unwrap());
+            let utxo_id_ascii: String = utxo_id.iter().map(|b| *b as char).collect();
 
-                CoinIndexDef::new(user_ascii, asset_ascii, amount, main_db_key.to_vec())
-            })
-            .collect()
+            let amount = u64::from_be_bytes(hex::decode(amount).unwrap().try_into().unwrap());
+
+            CoinIndexDef::new(
+                user_ascii,
+                asset_ascii,
+                amount,
+                main_db_key.to_vec(),
+                utxo_id_ascii,
+            )
+        })
+    }
+
+    fn get_coins<S>(
+        &self,
+        user: S,
+        asset: S,
+        excluded_utxo_ids: Option<String>,
+    ) -> Vec<CoinIndexDef>
+    where
+        S: ToString + core::fmt::Display + Clone,
+    {
+        let iter = self.iter(user, asset);
+        //if let Some(excluded_utxo_ids) = excluded_utxo_ids {}
+        iter.collect()
     }
 }
 
@@ -189,6 +214,9 @@ impl Drop for CoinsManager {
 }
 
 fn main() {
+    let x: u64 = 54321;
+    println!("{}, {}", x, hex::encode(x.to_be_bytes()));
+
     /*
     let cm = CoinsManager::new();
 
@@ -261,56 +289,84 @@ mod tests {
     use rocksdb::DB;
     use test_case::test_case;
 
-    use crate::{normalize_string, CoinDef, CoinIndexDef, CoinsManager};
+    use crate::{make_string_exactly_8_chars_long, CoinDef, CoinIndexDef, CoinsManager};
+
+    type UtxoIdDef = str;
+    type OwnerDef = str;
+    type AssetDef = str;
+    type AmountDef = u64;
+
+    type Coin = (
+        &'static UtxoIdDef,
+        &'static OwnerDef,
+        &'static AssetDef,
+        u64,
+    );
+    type CoinDatabase = &'static [Coin];
+
+    impl From<&(&UtxoIdDef, &OwnerDef, &AssetDef, AmountDef)> for CoinIndexDef {
+        fn from(
+            (utxo_id, user, asset, amount): &(&UtxoIdDef, &OwnerDef, &AssetDef, AmountDef),
+        ) -> Self {
+            Self::new(
+                make_string_exactly_8_chars_long(user.to_string()),
+                make_string_exactly_8_chars_long(asset.to_string()),
+                *amount,
+                vec![],
+                utxo_id.to_string(),
+            )
+        }
+    }
 
     #[derive(Debug)]
     struct TestCase {
-        coins: &'static [(&'static str, &'static str, u64)],
+        coins: CoinDatabase,
         owner: &'static str,
         asset: &'static str,
-        expected_coins: &'static [(&'static str, &'static str, u64)],
+        expected_coins: &'static [Coin],
     }
 
     #[rustfmt::skip]
-    const COIN_DATABASE: &'static [(&'static str, &'static str, u64)] =
+    const COIN_DATABASE: CoinDatabase =
         &[
-            ("Alice", "BTC", 1),
-            ("Alice", "ETH", 2),
-
-            ("Bob", "BTC", 3),
-            ("Bob", "LCK", 4),
-
-            ("Charlie", "BTC", 5),
-
-            // Two identical coins
-            ("Dave", "LCK", 10),
-            ("Dave", "LCK", 10),
-
-            ("Eve", "BTC", 8),
-            ("Eve", "ETH", 8),
-
-            ("Frank", "BTC", 1),
-            
-            ("Grace", "BTC", 2),
-            ("Grace", "BTC", 3),
-            ("Grace", "ETH", 1),
-            ("Grace", "ETH", 3),
-            ("Grace", "BTC", 1),
-            ("Grace", "ETH", 2),
+            ("UTXO00", "Alice", "BTC", 1),
+            ("UTXO01", "Alice", "ETH", 2),
+ 
+            ("UTXO02", "Bob", "BTC", 3),
+            ("UTXO03", "Bob", "LCK", 4),
+ 
+            ("UTXO04", "Charlie", "BTC", 5),
+ 
+            ("UTXO05", "Dave", "LCK", 10),
+            ("UTXO06", "Dave", "LCK", 10),
+            ("UTXO07", "Dave", "BTC", 11),
+            ("UTXO08", "Dave", "BTC", 11),
+ 
+            ("UTXO09", "Eve", "BTC", 8),
+            ("UTXO10", "Eve", "ETH", 8),
+ 
+            ("UTXO11", "Frank", "BTC", 1),
+             
+            ("UTXO12", "Grace", "BTC", 2),
+            ("UTXO13", "Grace", "BTC", 3),
+            ("UTXO14", "Grace", "ETH", 1),
+            ("UTXO15", "Grace", "ETH", 3),
+            ("UTXO16", "Grace", "BTC", 1),
+            ("UTXO17", "Grace", "ETH", 2),
         ];
 
     const SINGLE_COIN_1: TestCase = TestCase {
         coins: COIN_DATABASE,
         owner: "Alice",
         asset: "BTC",
-        expected_coins: &[("Alice", "BTC", 1)],
+        expected_coins: &[("UTXO00", "Alice", "BTC", 1)],
     };
 
     const SINGLE_COIN_2: TestCase = TestCase {
         coins: COIN_DATABASE,
         owner: "Alice",
         asset: "ETH",
-        expected_coins: &[("Alice", "ETH", 2)],
+        expected_coins: &[("UTXO01", "Alice", "ETH", 2)],
     };
 
     const MULTIPLE_COINS: TestCase = TestCase {
@@ -318,9 +374,9 @@ mod tests {
         owner: "Grace",
         asset: "BTC",
         expected_coins: &[
-            ("Grace", "BTC", 1),
-            ("Grace", "BTC", 2),
-            ("Grace", "BTC", 3),
+            ("UTXO16", "Grace", "BTC", 1),
+            ("UTXO12", "Grace", "BTC", 2),
+            ("UTXO13", "Grace", "BTC", 3),
         ],
     };
 
@@ -338,11 +394,18 @@ mod tests {
         expected_coins: &[],
     };
 
-    const COINS_DO_NOT_CONFLICT: TestCase = TestCase {
+    const COINS_DO_NOT_CONFLICT_1: TestCase = TestCase {
         coins: COIN_DATABASE,
         owner: "Dave",
         asset: "LCK",
-        expected_coins: &[("Dave", "LCK", 10), ("Dave", "LCK", 10)],
+        expected_coins: &[("UTXO05", "Dave", "LCK", 10), ("UTXO06", "Dave", "LCK", 10)],
+    };
+
+    const COINS_DO_NOT_CONFLICT_2: TestCase = TestCase {
+        coins: COIN_DATABASE,
+        owner: "Dave",
+        asset: "BTC",
+        expected_coins: &[("UTXO07", "Dave", "BTC", 11), ("UTXO08", "Dave", "BTC", 11)],
     };
 
     #[test_case(SINGLE_COIN_1; "Single coin retrieval 1")]
@@ -350,7 +413,8 @@ mod tests {
     #[test_case(MULTIPLE_COINS; "Multiple coins retrieval")]
     #[test_case(NO_COINS_MISSING_ASSET; "No coins due to missing asset")]
     #[test_case(NO_COINS_MISSING_OWNER; "No coins due to missing owner")]
-    #[test_case(COINS_DO_NOT_CONFLICT; "Coins do not conflict")]
+    #[test_case(COINS_DO_NOT_CONFLICT_1; "Coins do not conflict 1")]
+    #[test_case(COINS_DO_NOT_CONFLICT_2; "Coins do not conflict 2")]
     fn coin_retrieval(
         TestCase {
             coins,
@@ -360,28 +424,38 @@ mod tests {
         }: TestCase,
     ) {
         let cm = make_coin_manager(coins);
-        let actual_coins = cm.get_coins(owner, asset);
+        let actual_coins: Vec<_> = cm.get_coins(owner, asset, None);
         assert_coins(&expected_coins, &actual_coins, &cm.main_db);
     }
 
-    fn make_coin_manager(coins: &'static [(&'static str, &'static str, u64)]) -> CoinsManager {
+    #[test_case(SINGLE_COIN_1; "Single coin retrieval 1")]
+    fn exclude_coin(
+        TestCase {
+            coins,
+            owner,
+            asset,
+            expected_coins,
+        }: TestCase,
+    ) {
+        let cm = make_coin_manager(coins);
+        let actual_coins: Vec<_> = cm.iter(owner, asset).collect();
+        assert_coins(&expected_coins, &actual_coins, &cm.main_db);
+    }
+
+    fn make_coin_manager(coins: CoinDatabase) -> CoinsManager {
         let cm = CoinsManager::new();
 
         // Shuffle coins before feeding them to the coin manager.
         let mut shuffled_coins = coins.to_vec();
         shuffled_coins.shuffle(&mut rand::thread_rng());
 
-        for (user, asset, amount) in shuffled_coins {
-            cm.add_coin(user, asset, amount);
+        for (utxo_id, user, asset, amount) in shuffled_coins {
+            cm.add_coin(utxo_id, user, asset, amount);
         }
         cm
     }
 
-    fn assert_coins(
-        expected: &[(&'static str, &'static str, u64)],
-        actual: &[CoinIndexDef],
-        main_db: &DB,
-    ) {
+    fn assert_coins(expected: &[Coin], actual: &[CoinIndexDef], main_db: &DB) {
         // Correct coins are returned.
         let expected: Vec<CoinIndexDef> = expected.iter().map(Into::into).collect::<Vec<_>>();
         assert_eq!(expected, actual);
@@ -400,7 +474,7 @@ mod tests {
             unique_metadata.insert(deserialized_metadata.metadata.clone());
         }
 
-        // Make sure that metadata are unique, ie. link to main DB is correct even for identical coins.
+        // Make sure that metadata are unique, ie. link to main DB is correct even for "identical" coins.
         assert_eq!(unique_metadata.len(), actual.len());
     }
 }
