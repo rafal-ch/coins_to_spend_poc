@@ -831,7 +831,7 @@ mod tests {
         #[test_case(dust_coins::ZERO_DUST_IF_ALL_SLOTS_FILLED)]
         #[test_case(dust_coins::NO_EXCLUDED_COINS_IN_DUST)]
 
-        fn exclude_coin(
+        fn selected_coins(
             TestCase {
                 coins,
                 owner,
