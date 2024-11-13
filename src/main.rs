@@ -209,7 +209,6 @@ impl CoinsManager {
                     .rev()
                     .take(max)
                     .take_while(|coin| {
-                        println!("iteration");
                         let should_continue = value_accumulated < *amount;
                         value_accumulated += coin.amount;
                         coins_taken += 1;
