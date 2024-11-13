@@ -15,7 +15,6 @@ struct CoinIndexDef {
     asset: String,
     amount: u64,
     utxo_id: String,
-    main_db_key: Vec<u8>,
 }
 
 impl PartialEq for CoinIndexDef {
@@ -32,14 +31,12 @@ impl CoinIndexDef {
         user: String,
         asset: String,
         amount: u64,
-        main_db_key: Vec<u8>,
         utxo_id: String,
     ) -> Self {
         Self {
             user,
             asset,
             amount,
-            main_db_key,
             utxo_id,
         }
     }
@@ -49,11 +46,10 @@ impl core::fmt::Display for CoinIndexDef {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "Coin Index {{ user: {}, asset: {}, amount: {}, main_db_key: {:?} }}",
+            "Coin Index {{ user: {}, asset: {}, amount: {} }}",
             self.user,
             self.asset,
             self.amount,
-            hex::encode(&self.main_db_key)
         )
     }
 }
@@ -61,7 +57,6 @@ impl core::fmt::Display for CoinIndexDef {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct CoinDef {
     amount: u64,
-    utxo_id: String,
     metadata: String,
 }
 
@@ -92,14 +87,13 @@ impl CoinsManager {
     ) {
         let user_as_hex = normalize_string(user.clone());
         let asset_as_hex = normalize_string(asset.clone());
-        let nonce = normalize_string(rand::random::<u64>().to_string());
 
         // println!("Adding: user={user}, asset={asset}, amount={amount}");
 
         // IMPORTANT: Both of these writes must happen in the same transaction!
 
         // Main DB
-        let main_key = format!("{user_as_hex}{asset_as_hex}{nonce}");
+        let main_key = format!("{utxo_id}");
         let metadata = CoinDef {
             amount,
             metadata: format!(
@@ -107,7 +101,6 @@ impl CoinsManager {
                 utxo_id,
                 rand::random::<u64>()
             ),
-            utxo_id: utxo_id.to_string(),
         };
         let serialized_metadata = postcard::to_allocvec(&metadata).unwrap();
         self.main_db
@@ -121,7 +114,7 @@ impl CoinsManager {
         let suffix = utxo_id.to_string();
         let key = format!("{user_as_hex}{asset_as_hex}{serialized_amount_hex}{suffix}");
         //println!("Indexing: key={key} length={}", key.len());
-        self.index_db.put(key, main_key).unwrap();
+        self.index_db.put(key, &[]).unwrap();
     }
 
     fn iter<S>(&self, user: S, asset: S) -> impl Iterator<Item = CoinIndexDef> + '_
@@ -134,7 +127,7 @@ impl CoinsManager {
         let prefix = format!("{user_as_hex}{asset_as_hex}");
         //println!("Reading: user={user}, asset={asset} --> prefix={prefix}");
         self.index_db.prefix_iterator(prefix).map(|entry| {
-            let (full_key, main_db_key) = entry.unwrap();
+            let (full_key, _) = entry.unwrap();
 
             let user = &full_key[..16];
             let asset = &full_key[16..32];
@@ -161,7 +154,6 @@ impl CoinsManager {
                 user_ascii,
                 asset_ascii,
                 amount,
-                main_db_key.to_vec(),
                 utxo_id_ascii,
             )
         })
@@ -264,17 +256,17 @@ fn main() {
     println!("Use cargo test");
 }
 
-fn dump_coins(main_db: &DB, coins: &[CoinIndexDef]) {
-    println!("\tCoins Index:");
-    for coin in coins {
-        let main_db_key = coin.main_db_key.clone();
-        let serialized_metadata = main_db.get(&main_db_key).unwrap().unwrap();
-        let deserialized_metadata: CoinDef = postcard::from_bytes(&serialized_metadata).unwrap();
+// fn dump_coins(main_db: &DB, coins: &[CoinIndexDef]) {
+    // println!("\tCoins Index:");
+    // for coin in coins {
+        // let main_db_key = coin.main_db_key.clone();
+        // let serialized_metadata = main_db.get(&main_db_key).unwrap().unwrap();
+        // let deserialized_metadata: CoinDef = postcard::from_bytes(&serialized_metadata).unwrap();
 
-        println!("\t\t{}", coin);
-        println!("\t\t\tMetadata: {:?}", deserialized_metadata);
-    }
-}
+        // println!("\t\t{}", coin);
+        // println!("\t\t\tMetadata: {:?}", deserialized_metadata);
+    // }
+// }
 
 #[cfg(test)]
 mod tests {
@@ -307,7 +299,6 @@ mod tests {
                 make_string_exactly_8_chars_long(user.to_string()),
                 make_string_exactly_8_chars_long(asset.to_string()),
                 *amount,
-                vec![],
                 utxo_id.to_string(),
             )
         }
@@ -515,7 +506,7 @@ mod tests {
         // Check link to main DB
         let mut unique_metadata = BTreeSet::new();
         for coin in actual {
-            let serialized_metadata = main_db.get(&coin.main_db_key).unwrap().unwrap();
+            let serialized_metadata = main_db.get(&coin.utxo_id).unwrap().unwrap();
             let deserialized_metadata: CoinDef =
                 postcard::from_bytes(&serialized_metadata).unwrap();
             assert!(!deserialized_metadata.metadata.is_empty());
