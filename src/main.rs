@@ -194,20 +194,17 @@ impl CoinsManager {
     where
         S: ToString + core::fmt::Display + Clone,
     {
-        let eligible_coins: Vec<_> = q
-            .iter()
-            .map(|q| {
-                let eligible_coins_per_asset = self.coins(&user, &q.asset, excluded_utxo_ids);
-                eligible_coins_per_asset
-            })
-            .collect();
+        let eligible_coins = q.iter().map(|q| {
+            let eligible_coins_per_asset = self.coins(&user, &q.asset, excluded_utxo_ids);
+            eligible_coins_per_asset
+        });
 
         //dbg!(&eligible_coins);
 
         // TODO: Make this more readable
         q.iter()
-            .zip(eligible_coins.iter())
-            .map(|(Query { asset, amount, max }, eligible_coins)| {
+            .zip(eligible_coins)
+            .map(|(Query { amount, max, .. }, eligible_coins)| {
                 let mut sum = 0;
                 let mut coins_taken = 0;
                 let selected_coins: Vec<_> = eligible_coins
@@ -216,6 +213,7 @@ impl CoinsManager {
                     .enumerate()
                     .take(max.unwrap_or(std::u32::MAX) as usize)
                     .take_while(|(index, coin)| {
+                        println!("iteration");
                         let should_continue = sum < *amount;
                         sum += coin.amount;
                         coins_taken = index + 1;
