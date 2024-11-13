@@ -194,37 +194,32 @@ impl CoinsManager {
     where
         S: ToString + core::fmt::Display + Clone,
     {
-        let eligible_coins = q.iter().map(|q| {
-            let eligible_coins_per_asset = self.coins(&user, &q.asset, excluded_utxo_ids);
-            eligible_coins_per_asset
-        });
+        let eligible_coins = q
+            .iter()
+            .map(|q| self.coins(&user, &q.asset, excluded_utxo_ids));
 
-        //dbg!(&eligible_coins);
-
-        // TODO: Make this more readable
         q.iter()
             .zip(eligible_coins)
             .map(|(Query { amount, max, .. }, eligible_coins)| {
-                let mut sum = 0;
+                let mut value_accumulated = 0;
                 let mut coins_taken = 0;
+                let max = max.unwrap_or(std::u32::MAX) as usize;
                 let selected_coins: Vec<_> = eligible_coins
                     .iter()
                     .rev()
-                    .enumerate()
-                    .take(max.unwrap_or(std::u32::MAX) as usize)
-                    .take_while(|(index, coin)| {
+                    .take(max)
+                    .take_while(|coin| {
                         println!("iteration");
-                        let should_continue = sum < *amount;
-                        sum += coin.amount;
-                        coins_taken = index + 1;
+                        let should_continue = value_accumulated < *amount;
+                        value_accumulated += coin.amount;
+                        coins_taken += 1;
                         should_continue
                     })
-                    .map(|(_, coin)| coin)
                     .cloned()
                     .collect();
 
                 //dbg!(&selected_coins);
-                if sum >= *amount && coins_taken <= max.unwrap_or(std::u32::MAX) as usize {
+                if value_accumulated >= *amount && coins_taken <= max {
                     selected_coins
                 } else {
                     vec![]
