@@ -167,18 +167,13 @@ impl CoinsManager {
         })
     }
 
-    fn get_coins<S>(
-        &self,
-        user: S,
-        asset: S,
-        excluded_utxo_ids: Option<String>,
-    ) -> Vec<CoinIndexDef>
+    fn get_coins<S>(&self, user: S, asset: S, excluded_utxo_ids: &[String]) -> Vec<CoinIndexDef>
     where
         S: ToString + core::fmt::Display + Clone,
     {
-        let iter = self.iter(user, asset);
-        //if let Some(excluded_utxo_ids) = excluded_utxo_ids {}
-        iter.collect()
+        self.iter(user, asset)
+            .filter(|coin| !excluded_utxo_ids.contains(&coin.utxo_id))
+            .collect()
     }
 }
 
@@ -324,6 +319,7 @@ mod tests {
         owner: &'static str,
         asset: &'static str,
         expected_coins: &'static [Coin],
+        excluded_utxos: &'static str,
     }
 
     #[rustfmt::skip]
@@ -359,6 +355,7 @@ mod tests {
         coins: COIN_DATABASE,
         owner: "Alice",
         asset: "BTC",
+        excluded_utxos: "",
         expected_coins: &[("UTXO00", "Alice", "BTC", 1)],
     };
 
@@ -366,6 +363,7 @@ mod tests {
         coins: COIN_DATABASE,
         owner: "Alice",
         asset: "ETH",
+        excluded_utxos: "",
         expected_coins: &[("UTXO01", "Alice", "ETH", 2)],
     };
 
@@ -373,6 +371,7 @@ mod tests {
         coins: COIN_DATABASE,
         owner: "Grace",
         asset: "BTC",
+        excluded_utxos: "",
         expected_coins: &[
             ("UTXO16", "Grace", "BTC", 1),
             ("UTXO12", "Grace", "BTC", 2),
@@ -384,6 +383,7 @@ mod tests {
         coins: COIN_DATABASE,
         owner: "Charlie",
         asset: "LCK",
+        excluded_utxos: "",
         expected_coins: &[],
     };
 
@@ -391,6 +391,7 @@ mod tests {
         coins: COIN_DATABASE,
         owner: "NON_EXISTENT_OWNER",
         asset: "LCK",
+        excluded_utxos: "",
         expected_coins: &[],
     };
 
@@ -398,6 +399,7 @@ mod tests {
         coins: COIN_DATABASE,
         owner: "Dave",
         asset: "LCK",
+        excluded_utxos: "",
         expected_coins: &[("UTXO05", "Dave", "LCK", 10), ("UTXO06", "Dave", "LCK", 10)],
     };
 
@@ -405,6 +407,7 @@ mod tests {
         coins: COIN_DATABASE,
         owner: "Dave",
         asset: "BTC",
+        excluded_utxos: "",
         expected_coins: &[("UTXO07", "Dave", "BTC", 11), ("UTXO08", "Dave", "BTC", 11)],
     };
 
@@ -421,24 +424,69 @@ mod tests {
             owner,
             asset,
             expected_coins,
+            ..
         }: TestCase,
     ) {
+        const NO_EXCLUDED_UTXO_IDS: &[String] = &[];
+
         let cm = make_coin_manager(coins);
-        let actual_coins: Vec<_> = cm.get_coins(owner, asset, None);
+        let actual_coins: Vec<_> = cm.get_coins(owner, asset, NO_EXCLUDED_UTXO_IDS);
         assert_coins(&expected_coins, &actual_coins, &cm.main_db);
     }
 
-    #[test_case(SINGLE_COIN_1; "Single coin retrieval 1")]
+    const EXCLUDE_SINGLE_UTXO: TestCase = TestCase {
+        coins: COIN_DATABASE,
+        owner: "Grace",
+        asset: "BTC",
+        excluded_utxos: "UTXO12",
+        expected_coins: &[("UTXO16", "Grace", "BTC", 1), ("UTXO13", "Grace", "BTC", 3)],
+    };
+
+    const EXCLUDE_ALL_UTXO: TestCase = TestCase {
+        coins: COIN_DATABASE,
+        owner: "Grace",
+        asset: "BTC",
+        excluded_utxos: "UTXO12;UTXO16;UTXO13",
+        expected_coins: &[],
+    };
+
+    const EXCLUDE_NON_EXISTENT_UTXO: TestCase = TestCase {
+        coins: COIN_DATABASE,
+        owner: "Dave",
+        asset: "LCK",
+        excluded_utxos: "NON_EXISTENT_UTXO",
+        expected_coins: &[("UTXO05", "Dave", "LCK", 10), ("UTXO06", "Dave", "LCK", 10)],
+    };
+
+    const EXCLUDE_WITH_IDENTICAL_COINS: TestCase = TestCase {
+        coins: COIN_DATABASE,
+        owner: "Dave",
+        asset: "BTC",
+        excluded_utxos: "UTXO07",
+        expected_coins: &[("UTXO08", "Dave", "BTC", 11)],
+    };
+
+    #[test_case(EXCLUDE_SINGLE_UTXO; "Exclude single UTXO")]
+    #[test_case(EXCLUDE_ALL_UTXO; "Exclude all UTXO")]
+    #[test_case(EXCLUDE_NON_EXISTENT_UTXO; "Exclude non existent UTXO has no effect")]
+    #[test_case(EXCLUDE_WITH_IDENTICAL_COINS; "Exclude correct UTXO with identical coins")]
     fn exclude_coin(
         TestCase {
             coins,
             owner,
             asset,
+            excluded_utxos,
             expected_coins,
         }: TestCase,
     ) {
+        let excluded_utxo_ids = excluded_utxos
+            .split(';')
+            .map(Into::into)
+            .collect::<Vec<_>>();
+
         let cm = make_coin_manager(coins);
-        let actual_coins: Vec<_> = cm.iter(owner, asset).collect();
+        let actual_coins: Vec<_> = cm.get_coins(owner, asset, &excluded_utxo_ids);
+
         assert_coins(&expected_coins, &actual_coins, &cm.main_db);
     }
 
