@@ -10,7 +10,7 @@ fn get_next_number() -> u64 {
 }
 
 #[derive(Debug)]
-struct CoinIndexDef {
+pub struct CoinIndexDef {
     user: String,
     asset: String,
     amount: u64,
@@ -27,12 +27,7 @@ impl PartialEq for CoinIndexDef {
 }
 
 impl CoinIndexDef {
-    fn new(
-        user: String,
-        asset: String,
-        amount: u64,
-        utxo_id: String,
-    ) -> Self {
+    fn new(user: String, asset: String, amount: u64, utxo_id: String) -> Self {
         Self {
             user,
             asset,
@@ -47,9 +42,7 @@ impl core::fmt::Display for CoinIndexDef {
         write!(
             f,
             "Coin Index {{ user: {}, asset: {}, amount: {} }}",
-            self.user,
-            self.asset,
-            self.amount,
+            self.user, self.asset, self.amount,
         )
     }
 }
@@ -63,6 +56,12 @@ struct CoinDef {
 struct CoinsManager {
     main_db: DB,
     index_db: DB,
+}
+
+struct Query {
+    asset_id: String,
+    amount: u64,
+    max: Option<u32>,
 }
 
 impl CoinsManager {
@@ -150,12 +149,7 @@ impl CoinsManager {
 
             let amount = u64::from_be_bytes(hex::decode(amount).unwrap().try_into().unwrap());
 
-            CoinIndexDef::new(
-                user_ascii,
-                asset_ascii,
-                amount,
-                utxo_id_ascii,
-            )
+            CoinIndexDef::new(user_ascii, asset_ascii, amount, utxo_id_ascii)
         })
     }
 
@@ -166,6 +160,13 @@ impl CoinsManager {
         self.iter(user, asset)
             .filter(|coin| !excluded_utxo_ids.contains(&coin.utxo_id))
             .collect()
+    }
+
+    fn coins_to_spend<S>(&self, user: S, q: Query) -> Vec<CoinIndexDef>
+    where
+        S: ToString + core::fmt::Display + Clone,
+    {
+        todo!()
     }
 }
 
@@ -201,284 +202,230 @@ impl Drop for CoinsManager {
 }
 
 fn main() {
-    let x: u64 = 54321;
-    println!("{}, {}", x, hex::encode(x.to_be_bytes()));
-
-    /*
-    let cm = CoinsManager::new();
-
-    // Two distinct coins
-    cm.add_coin("Alice", "BTC", 1);
-    cm.add_coin("Alice", "ETH", 2);
-
-    // Two distinct coins
-    cm.add_coin("Bob", "BTC", 3);
-    cm.add_coin("Bob", "LCK", 4);
-
-    // Single coin
-    cm.add_coin("Charlie", "BTC", 5);
-
-    // Two identical coins
-    cm.add_coin("Dave", "ETH", 6);
-    cm.add_coin("Dave", "ETH", 7);
-
-    // Same value, different asset ID
-    cm.add_coin("Eve", "BTC", 8);
-    cm.add_coin("Eve", "ETH", 8);
-
-    // Alice also has 1 BTC, this differs only by user
-    cm.add_coin("Frank", "BTC", 1);
-
-    // Many coins and different assets
-    cm.add_coin("Grace", "BTC", 2);
-    cm.add_coin("Grace", "BTC", 3);
-    cm.add_coin("Grace", "ETH", 1);
-    cm.add_coin("Grace", "ETH", 3);
-    cm.add_coin("Grace", "BTC", 1);
-    cm.add_coin("Grace", "ETH", 2);
-
-    // Do some retrievals
-    let coins = cm.get_coins("Dave", "ETH");
-    dump_coins(&cm.main_db, &coins);
-
-    let coins = cm.get_coins("Grace", "ETH");
-    dump_coins(&cm.main_db, &coins);
-
-    let coins = cm.get_coins("Grace", "BTC");
-    dump_coins(&cm.main_db, &coins);
-
-    let coins = cm.get_coins("Charlie", "LCK");
-    dump_coins(&cm.main_db, &coins);
-
-    let coins = cm.get_coins("Bob", "LCK");
-    dump_coins(&cm.main_db, &coins);
-    */
     println!("Use cargo test");
 }
-
-// fn dump_coins(main_db: &DB, coins: &[CoinIndexDef]) {
-    // println!("\tCoins Index:");
-    // for coin in coins {
-        // let main_db_key = coin.main_db_key.clone();
-        // let serialized_metadata = main_db.get(&main_db_key).unwrap().unwrap();
-        // let deserialized_metadata: CoinDef = postcard::from_bytes(&serialized_metadata).unwrap();
-
-        // println!("\t\t{}", coin);
-        // println!("\t\t\tMetadata: {:?}", deserialized_metadata);
-    // }
-// }
 
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;
 
+    use coin_retrieval::{Coin, CoinDatabase};
     use rand::seq::SliceRandom;
     use rocksdb::DB;
-    use test_case::test_case;
 
-    use crate::{make_string_exactly_8_chars_long, CoinDef, CoinIndexDef, CoinsManager};
+    use crate::{CoinDef, CoinIndexDef, CoinsManager};
 
-    type UtxoIdDef = str;
-    type OwnerDef = str;
-    type AssetDef = str;
-    type AmountDef = u64;
+    mod coin_retrieval {
+        use test_case::test_case;
 
-    type Coin = (
-        &'static UtxoIdDef,
-        &'static OwnerDef,
-        &'static AssetDef,
-        u64,
-    );
-    type CoinDatabase = &'static [Coin];
+        use crate::{
+            make_string_exactly_8_chars_long,
+            tests::{assert_coins, make_coin_manager},
+            CoinIndexDef,
+        };
 
-    impl From<&(&UtxoIdDef, &OwnerDef, &AssetDef, AmountDef)> for CoinIndexDef {
-        fn from(
-            (utxo_id, user, asset, amount): &(&UtxoIdDef, &OwnerDef, &AssetDef, AmountDef),
-        ) -> Self {
-            Self::new(
-                make_string_exactly_8_chars_long(user.to_string()),
-                make_string_exactly_8_chars_long(asset.to_string()),
-                *amount,
-                utxo_id.to_string(),
-            )
+        type UtxoIdDef = str;
+        type OwnerDef = str;
+        type AssetDef = str;
+        type AmountDef = u64;
+
+        pub type Coin = (
+            &'static UtxoIdDef,
+            &'static OwnerDef,
+            &'static AssetDef,
+            u64,
+        );
+        pub type CoinDatabase = &'static [Coin];
+
+        impl From<&(&UtxoIdDef, &OwnerDef, &AssetDef, AmountDef)> for CoinIndexDef {
+            fn from(
+                (utxo_id, user, asset, amount): &(&UtxoIdDef, &OwnerDef, &AssetDef, AmountDef),
+            ) -> Self {
+                Self::new(
+                    make_string_exactly_8_chars_long(user.to_string()),
+                    make_string_exactly_8_chars_long(asset.to_string()),
+                    *amount,
+                    utxo_id.to_string(),
+                )
+            }
         }
-    }
 
-    #[derive(Debug)]
-    struct TestCase {
-        coins: CoinDatabase,
-        owner: &'static str,
-        asset: &'static str,
-        expected_coins: &'static [Coin],
-        excluded_utxos: &'static str,
-    }
+        #[derive(Debug)]
+        struct TestCase {
+            coins: CoinDatabase,
+            owner: &'static str,
+            asset: &'static str,
+            expected_coins: &'static [Coin],
+            excluded_utxos: &'static str,
+        }
 
-    #[rustfmt::skip]
-    const COIN_DATABASE: CoinDatabase =
-        &[
-            ("UTXO00", "Alice", "BTC", 1),
-            ("UTXO01", "Alice", "ETH", 2),
- 
-            ("UTXO02", "Bob", "BTC", 3),
-            ("UTXO03", "Bob", "LCK", 4),
- 
-            ("UTXO04", "Charlie", "BTC", 5),
- 
-            ("UTXO05", "Dave", "LCK", 10),
-            ("UTXO06", "Dave", "LCK", 10),
-            ("UTXO07", "Dave", "BTC", 11),
-            ("UTXO08", "Dave", "BTC", 11),
- 
-            ("UTXO09", "Eve", "BTC", 8),
-            ("UTXO10", "Eve", "ETH", 8),
- 
-            ("UTXO11", "Frank", "BTC", 1),
-             
-            ("UTXO12", "Grace", "BTC", 2),
-            ("UTXO13", "Grace", "BTC", 3),
-            ("UTXO14", "Grace", "ETH", 1),
-            ("UTXO15", "Grace", "ETH", 3),
-            ("UTXO16", "Grace", "BTC", 1),
-            ("UTXO17", "Grace", "ETH", 2),
-        ];
+        #[rustfmt::skip]
+        const COIN_DATABASE: CoinDatabase =
+            &[
+                ("UTXO00", "Alice", "BTC", 1),
+                ("UTXO01", "Alice", "ETH", 2),
+    
+                ("UTXO02", "Bob", "BTC", 3),
+                ("UTXO03", "Bob", "LCK", 4),
+    
+                ("UTXO04", "Charlie", "BTC", 5),
+    
+                ("UTXO05", "Dave", "LCK", 10),
+                ("UTXO06", "Dave", "LCK", 10),
+                ("UTXO07", "Dave", "BTC", 11),
+                ("UTXO08", "Dave", "BTC", 11),
+    
+                ("UTXO09", "Eve", "BTC", 8),
+                ("UTXO10", "Eve", "ETH", 8),
+    
+                ("UTXO11", "Frank", "BTC", 1),
+                
+                ("UTXO12", "Grace", "BTC", 2),
+                ("UTXO13", "Grace", "BTC", 3),
+                ("UTXO14", "Grace", "ETH", 1),
+                ("UTXO15", "Grace", "ETH", 3),
+                ("UTXO16", "Grace", "BTC", 1),
+                ("UTXO17", "Grace", "ETH", 2),
+            ];
 
-    const SINGLE_COIN_1: TestCase = TestCase {
-        coins: COIN_DATABASE,
-        owner: "Alice",
-        asset: "BTC",
-        excluded_utxos: "",
-        expected_coins: &[("UTXO00", "Alice", "BTC", 1)],
-    };
+        const SINGLE_COIN_1: TestCase = TestCase {
+            coins: COIN_DATABASE,
+            owner: "Alice",
+            asset: "BTC",
+            excluded_utxos: "",
+            expected_coins: &[("UTXO00", "Alice", "BTC", 1)],
+        };
 
-    const SINGLE_COIN_2: TestCase = TestCase {
-        coins: COIN_DATABASE,
-        owner: "Alice",
-        asset: "ETH",
-        excluded_utxos: "",
-        expected_coins: &[("UTXO01", "Alice", "ETH", 2)],
-    };
+        const SINGLE_COIN_2: TestCase = TestCase {
+            coins: COIN_DATABASE,
+            owner: "Alice",
+            asset: "ETH",
+            excluded_utxos: "",
+            expected_coins: &[("UTXO01", "Alice", "ETH", 2)],
+        };
 
-    const MULTIPLE_COINS: TestCase = TestCase {
-        coins: COIN_DATABASE,
-        owner: "Grace",
-        asset: "BTC",
-        excluded_utxos: "",
-        expected_coins: &[
-            ("UTXO16", "Grace", "BTC", 1),
-            ("UTXO12", "Grace", "BTC", 2),
-            ("UTXO13", "Grace", "BTC", 3),
-        ],
-    };
+        const MULTIPLE_COINS: TestCase = TestCase {
+            coins: COIN_DATABASE,
+            owner: "Grace",
+            asset: "BTC",
+            excluded_utxos: "",
+            expected_coins: &[
+                ("UTXO16", "Grace", "BTC", 1),
+                ("UTXO12", "Grace", "BTC", 2),
+                ("UTXO13", "Grace", "BTC", 3),
+            ],
+        };
 
-    const NO_COINS_MISSING_ASSET: TestCase = TestCase {
-        coins: COIN_DATABASE,
-        owner: "Charlie",
-        asset: "LCK",
-        excluded_utxos: "",
-        expected_coins: &[],
-    };
+        const NO_COINS_MISSING_ASSET: TestCase = TestCase {
+            coins: COIN_DATABASE,
+            owner: "Charlie",
+            asset: "LCK",
+            excluded_utxos: "",
+            expected_coins: &[],
+        };
 
-    const NO_COINS_MISSING_OWNER: TestCase = TestCase {
-        coins: COIN_DATABASE,
-        owner: "NON_EXISTENT_OWNER",
-        asset: "LCK",
-        excluded_utxos: "",
-        expected_coins: &[],
-    };
+        const NO_COINS_MISSING_OWNER: TestCase = TestCase {
+            coins: COIN_DATABASE,
+            owner: "NON_EXISTENT_OWNER",
+            asset: "LCK",
+            excluded_utxos: "",
+            expected_coins: &[],
+        };
 
-    const COINS_DO_NOT_CONFLICT_1: TestCase = TestCase {
-        coins: COIN_DATABASE,
-        owner: "Dave",
-        asset: "LCK",
-        excluded_utxos: "",
-        expected_coins: &[("UTXO05", "Dave", "LCK", 10), ("UTXO06", "Dave", "LCK", 10)],
-    };
+        const COINS_DO_NOT_CONFLICT_1: TestCase = TestCase {
+            coins: COIN_DATABASE,
+            owner: "Dave",
+            asset: "LCK",
+            excluded_utxos: "",
+            expected_coins: &[("UTXO05", "Dave", "LCK", 10), ("UTXO06", "Dave", "LCK", 10)],
+        };
 
-    const COINS_DO_NOT_CONFLICT_2: TestCase = TestCase {
-        coins: COIN_DATABASE,
-        owner: "Dave",
-        asset: "BTC",
-        excluded_utxos: "",
-        expected_coins: &[("UTXO07", "Dave", "BTC", 11), ("UTXO08", "Dave", "BTC", 11)],
-    };
+        const COINS_DO_NOT_CONFLICT_2: TestCase = TestCase {
+            coins: COIN_DATABASE,
+            owner: "Dave",
+            asset: "BTC",
+            excluded_utxos: "",
+            expected_coins: &[("UTXO07", "Dave", "BTC", 11), ("UTXO08", "Dave", "BTC", 11)],
+        };
 
-    #[test_case(SINGLE_COIN_1; "Single coin retrieval 1")]
-    #[test_case(SINGLE_COIN_2; "Single coin retrieval 2")]
-    #[test_case(MULTIPLE_COINS; "Multiple coins retrieval")]
-    #[test_case(NO_COINS_MISSING_ASSET; "No coins due to missing asset")]
-    #[test_case(NO_COINS_MISSING_OWNER; "No coins due to missing owner")]
-    #[test_case(COINS_DO_NOT_CONFLICT_1; "Coins do not conflict 1")]
-    #[test_case(COINS_DO_NOT_CONFLICT_2; "Coins do not conflict 2")]
-    fn coin_retrieval(
-        TestCase {
-            coins,
-            owner,
-            asset,
-            expected_coins,
-            ..
-        }: TestCase,
-    ) {
-        const NO_EXCLUDED_UTXO_IDS: &[String] = &[];
+        #[test_case(SINGLE_COIN_1; "Single coin retrieval 1")]
+        #[test_case(SINGLE_COIN_2; "Single coin retrieval 2")]
+        #[test_case(MULTIPLE_COINS; "Multiple coins retrieval")]
+        #[test_case(NO_COINS_MISSING_ASSET; "No coins due to missing asset")]
+        #[test_case(NO_COINS_MISSING_OWNER; "No coins due to missing owner")]
+        #[test_case(COINS_DO_NOT_CONFLICT_1; "Coins do not conflict 1")]
+        #[test_case(COINS_DO_NOT_CONFLICT_2; "Coins do not conflict 2")]
+        fn coin_retrieval(
+            TestCase {
+                coins,
+                owner,
+                asset,
+                expected_coins,
+                ..
+            }: TestCase,
+        ) {
+            const NO_EXCLUDED_UTXO_IDS: &[String] = &[];
 
-        let cm = make_coin_manager(coins);
-        let actual_coins: Vec<_> = cm.get_coins(owner, asset, NO_EXCLUDED_UTXO_IDS);
-        assert_coins(&expected_coins, &actual_coins, &cm.main_db);
-    }
+            let cm = make_coin_manager(coins);
+            let actual_coins: Vec<_> = cm.get_coins(owner, asset, NO_EXCLUDED_UTXO_IDS);
+            assert_coins(&expected_coins, &actual_coins, &cm.main_db);
+        }
 
-    const EXCLUDE_SINGLE_UTXO: TestCase = TestCase {
-        coins: COIN_DATABASE,
-        owner: "Grace",
-        asset: "BTC",
-        excluded_utxos: "UTXO12",
-        expected_coins: &[("UTXO16", "Grace", "BTC", 1), ("UTXO13", "Grace", "BTC", 3)],
-    };
+        const EXCLUDE_SINGLE_UTXO: TestCase = TestCase {
+            coins: COIN_DATABASE,
+            owner: "Grace",
+            asset: "BTC",
+            excluded_utxos: "UTXO12",
+            expected_coins: &[("UTXO16", "Grace", "BTC", 1), ("UTXO13", "Grace", "BTC", 3)],
+        };
 
-    const EXCLUDE_ALL_UTXO: TestCase = TestCase {
-        coins: COIN_DATABASE,
-        owner: "Grace",
-        asset: "BTC",
-        excluded_utxos: "UTXO12;UTXO16;UTXO13",
-        expected_coins: &[],
-    };
+        const EXCLUDE_ALL_UTXO: TestCase = TestCase {
+            coins: COIN_DATABASE,
+            owner: "Grace",
+            asset: "BTC",
+            excluded_utxos: "UTXO12;UTXO16;UTXO13",
+            expected_coins: &[],
+        };
 
-    const EXCLUDE_NON_EXISTENT_UTXO: TestCase = TestCase {
-        coins: COIN_DATABASE,
-        owner: "Dave",
-        asset: "LCK",
-        excluded_utxos: "NON_EXISTENT_UTXO",
-        expected_coins: &[("UTXO05", "Dave", "LCK", 10), ("UTXO06", "Dave", "LCK", 10)],
-    };
+        const EXCLUDE_NON_EXISTENT_UTXO: TestCase = TestCase {
+            coins: COIN_DATABASE,
+            owner: "Dave",
+            asset: "LCK",
+            excluded_utxos: "NON_EXISTENT_UTXO",
+            expected_coins: &[("UTXO05", "Dave", "LCK", 10), ("UTXO06", "Dave", "LCK", 10)],
+        };
 
-    const EXCLUDE_WITH_IDENTICAL_COINS: TestCase = TestCase {
-        coins: COIN_DATABASE,
-        owner: "Dave",
-        asset: "BTC",
-        excluded_utxos: "UTXO07",
-        expected_coins: &[("UTXO08", "Dave", "BTC", 11)],
-    };
+        const EXCLUDE_WITH_IDENTICAL_COINS: TestCase = TestCase {
+            coins: COIN_DATABASE,
+            owner: "Dave",
+            asset: "BTC",
+            excluded_utxos: "UTXO07",
+            expected_coins: &[("UTXO08", "Dave", "BTC", 11)],
+        };
 
-    #[test_case(EXCLUDE_SINGLE_UTXO; "Exclude single UTXO")]
-    #[test_case(EXCLUDE_ALL_UTXO; "Exclude all UTXO")]
-    #[test_case(EXCLUDE_NON_EXISTENT_UTXO; "Exclude non existent UTXO has no effect")]
-    #[test_case(EXCLUDE_WITH_IDENTICAL_COINS; "Exclude correct UTXO with identical coins")]
-    fn exclude_coin(
-        TestCase {
-            coins,
-            owner,
-            asset,
-            excluded_utxos,
-            expected_coins,
-        }: TestCase,
-    ) {
-        let excluded_utxo_ids = excluded_utxos
-            .split(';')
-            .map(Into::into)
-            .collect::<Vec<_>>();
+        #[test_case(EXCLUDE_SINGLE_UTXO; "Exclude single UTXO")]
+        #[test_case(EXCLUDE_ALL_UTXO; "Exclude all UTXO")]
+        #[test_case(EXCLUDE_NON_EXISTENT_UTXO; "Exclude non existent UTXO has no effect")]
+        #[test_case(EXCLUDE_WITH_IDENTICAL_COINS; "Exclude correct UTXO with identical coins")]
+        fn exclude_coin(
+            TestCase {
+                coins,
+                owner,
+                asset,
+                excluded_utxos,
+                expected_coins,
+            }: TestCase,
+        ) {
+            let excluded_utxo_ids = excluded_utxos
+                .split(';')
+                .map(Into::into)
+                .collect::<Vec<_>>();
 
-        let cm = make_coin_manager(coins);
-        let actual_coins: Vec<_> = cm.get_coins(owner, asset, &excluded_utxo_ids);
+            let cm = make_coin_manager(coins);
+            let actual_coins: Vec<_> = cm.get_coins(owner, asset, &excluded_utxo_ids);
 
-        assert_coins(&expected_coins, &actual_coins, &cm.main_db);
+            assert_coins(&expected_coins, &actual_coins, &cm.main_db);
+        }
     }
 
     fn make_coin_manager(coins: CoinDatabase) -> CoinsManager {
