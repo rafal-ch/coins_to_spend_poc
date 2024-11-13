@@ -1,17 +1,7 @@
-use std::{
-    collections::BTreeMap,
-    str::FromStr,
-    sync::atomic::{AtomicU64, Ordering},
-};
+use std::str::FromStr;
 
 use rocksdb::{Options, SliceTransform, DB};
 use serde::{Deserialize, Serialize};
-
-static SUFFIX_PROVIDER: AtomicU64 = AtomicU64::new(0);
-fn get_next_number() -> u64 {
-    // Use fetch_add to atomically increment the counter and return the previous value
-    SUFFIX_PROVIDER.fetch_add(1, Ordering::SeqCst)
-}
 
 #[derive(Debug, Clone)]
 pub struct CoinIndexDef {
@@ -204,11 +194,12 @@ impl CoinsManager {
                 let mut value_accumulated = 0;
                 let mut coins_taken = 0;
                 let max = max.unwrap_or(std::u32::MAX) as usize;
-                let selected_coins: Vec<_> = eligible_coins
+                let mut selected_coins: Vec<_> = eligible_coins
                     .iter()
                     .rev()
                     .take(max)
                     .take_while(|coin| {
+                        // TODO[RC]: Refactor and simplify this
                         let should_continue = value_accumulated < *amount;
                         value_accumulated += coin.amount;
                         coins_taken += 1;
@@ -218,6 +209,11 @@ impl CoinsManager {
                     .collect();
 
                 if value_accumulated >= *amount && coins_taken <= max {
+                    let slots_left = max - selected_coins.len();
+                    let to_be_filled_with_dust =
+                        slots_left.min(eligible_coins.len() - selected_coins.len());
+                    selected_coins
+                        .extend(eligible_coins.iter().take(to_be_filled_with_dust).cloned());
                     selected_coins
                 } else {
                     vec![]
@@ -681,6 +677,77 @@ mod tests {
             };
         }
 
+        mod dust_coins {
+            use crate::tests::COIN_DATABASE;
+
+            use super::TestCase;
+
+            pub(super) const FILLS_WITH_DUST_COINS_UP_TO_THE_LIMIT: TestCase = TestCase {
+                coins: COIN_DATABASE,
+                owner: "Eve",
+                excluded_utxos: "",
+                query: &["BTC;200;6", "LCK;100;2"],
+                expected_coins: &[
+                    ("UTXO80", "Eve", "BTC", 100),
+                    ("UTXO81", "Eve", "BTC", 75),
+                    ("UTXO82", "Eve", "BTC", 50),
+                    ("UTXO88", "Eve", "BTC", 1),
+                    ("UTXO87", "Eve", "BTC", 2),
+                    ("UTXO86", "Eve", "BTC", 3),
+                    ("UTXO90", "Eve", "LCK", 100),
+                    ("UTXO98", "Eve", "LCK", 1),
+                ],
+            };
+
+            pub(super) const FILLING_WITH_DUST_DOES_NOT_PRODUCE_DUPLICATES: TestCase = TestCase {
+                coins: COIN_DATABASE,
+                owner: "Eve",
+                excluded_utxos: "",
+                query: &["LCK;200;-"],
+                expected_coins: &[
+                    ("UTXO90", "Eve", "LCK", 100),
+                    ("UTXO91", "Eve", "LCK", 75),
+                    ("UTXO92", "Eve", "LCK", 50),
+                    ("UTXO98", "Eve", "LCK", 1),
+                    ("UTXO97", "Eve", "LCK", 2),
+                    ("UTXO96", "Eve", "LCK", 3),
+                    ("UTXO95", "Eve", "LCK", 4),
+                    ("UTXO94", "Eve", "LCK", 5),
+                    ("UTXO93", "Eve", "LCK", 25),
+                ],
+            };
+
+            pub(super) const ZERO_DUST_IF_ALL_COINS_USED: TestCase = TestCase {
+                coins: COIN_DATABASE,
+                owner: "Eve",
+                excluded_utxos: "",
+                query: &["BTC;265;-"],
+                expected_coins: &[
+                    ("UTXO80", "Eve", "BTC", 100),
+                    ("UTXO81", "Eve", "BTC", 75),
+                    ("UTXO82", "Eve", "BTC", 50),
+                    ("UTXO83", "Eve", "BTC", 25),
+                    ("UTXO84", "Eve", "BTC", 5),
+                    ("UTXO85", "Eve", "BTC", 4),
+                    ("UTXO86", "Eve", "BTC", 3),
+                    ("UTXO87", "Eve", "BTC", 2),
+                    ("UTXO88", "Eve", "BTC", 1),
+                ],
+            };
+
+            pub(super) const ZERO_DUST_IF_ALL_SLOTS_FILLED: TestCase = TestCase {
+                coins: COIN_DATABASE,
+                owner: "Eve",
+                excluded_utxos: "",
+                query: &["BTC;225;3"],
+                expected_coins: &[
+                    ("UTXO80", "Eve", "BTC", 100),
+                    ("UTXO81", "Eve", "BTC", 75),
+                    ("UTXO82", "Eve", "BTC", 50),
+                ],
+            };
+        }
+
         #[test_case(without_exclusion_without_limits::SINGLE_ASSET)]
         #[test_case(without_exclusion_without_limits::MULTIPLE_ASSETS)]
         #[test_case(with_exclusion_without_limits::SINGLE_EXCLUSION)]
@@ -693,6 +760,11 @@ mod tests {
         #[test_case(with_exclusion_with_limits::LIMIT_TOO_LOW_ON_ALL_ASSETS)]
         #[test_case(with_exclusion_with_limits::LIMIT_TOO_LOW_ON_SINGLE_ASSET_1)]
         #[test_case(with_exclusion_with_limits::LIMIT_TOO_LOW_ON_SINGLE_ASSET_2)]
+        #[test_case(dust_coins::FILLS_WITH_DUST_COINS_UP_TO_THE_LIMIT)]
+        #[test_case(dust_coins::FILLING_WITH_DUST_DOES_NOT_PRODUCE_DUPLICATES)]
+        #[test_case(dust_coins::ZERO_DUST_IF_ALL_COINS_USED)]
+        #[test_case(dust_coins::ZERO_DUST_IF_ALL_SLOTS_FILLED)]
+
         fn exclude_coin(
             TestCase {
                 coins,
