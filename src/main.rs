@@ -1,4 +1,8 @@
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::{
+    collections::BTreeMap,
+    str::FromStr,
+    sync::atomic::{AtomicU64, Ordering},
+};
 
 use rocksdb::{Options, SliceTransform, DB};
 use serde::{Deserialize, Serialize};
@@ -9,7 +13,7 @@ fn get_next_number() -> u64 {
     SUFFIX_PROVIDER.fetch_add(1, Ordering::SeqCst)
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct CoinIndexDef {
     user: String,
     asset: String,
@@ -58,10 +62,27 @@ struct CoinsManager {
     index_db: DB,
 }
 
+#[derive(Debug)]
 struct Query {
-    asset_id: String,
+    asset: String,
     amount: u64,
     max: Option<u32>,
+}
+
+impl FromStr for Query {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mut parts = s.split(';');
+        let asset_id = parts.next().ok_or(())?.to_string();
+        let amount = parts.next().ok_or(())?.parse().map_err(|_| ())?;
+        let max = parts.next().ok_or(())?.parse().ok();
+        Ok(Self {
+            asset: asset_id,
+            amount,
+            max,
+        })
+    }
 }
 
 impl CoinsManager {
@@ -116,9 +137,10 @@ impl CoinsManager {
         self.index_db.put(key, &[]).unwrap();
     }
 
-    fn iter<S>(&self, user: S, asset: S) -> impl Iterator<Item = CoinIndexDef> + '_
+    fn iter<S, T>(&self, user: S, asset: T) -> impl Iterator<Item = CoinIndexDef> + '_
     where
         S: ToString + core::fmt::Display + Clone,
+        T: ToString + core::fmt::Display + Clone,
     {
         let user_as_hex = normalize_string(user.clone());
         let asset_as_hex = normalize_string(asset.clone());
@@ -153,20 +175,58 @@ impl CoinsManager {
         })
     }
 
-    fn get_coins<S>(&self, user: S, asset: S, excluded_utxo_ids: &[String]) -> Vec<CoinIndexDef>
+    fn coins<S, T>(&self, user: S, asset: T, excluded_utxo_ids: &[String]) -> Vec<CoinIndexDef>
     where
         S: ToString + core::fmt::Display + Clone,
+        T: ToString + core::fmt::Display + Clone,
     {
         self.iter(user, asset)
             .filter(|coin| !excluded_utxo_ids.contains(&coin.utxo_id))
             .collect()
     }
 
-    fn coins_to_spend<S>(&self, user: S, q: Query) -> Vec<CoinIndexDef>
+    fn coins_to_spend<S>(
+        &self,
+        user: S,
+        q: &[Query],
+        excluded_utxo_ids: &[String],
+    ) -> Vec<Vec<CoinIndexDef>>
     where
         S: ToString + core::fmt::Display + Clone,
     {
-        todo!()
+        let eligible_coins: Vec<_> = q
+            .iter()
+            .map(|q| {
+                let eligible_coins_per_asset = self.coins(&user, &q.asset, excluded_utxo_ids);
+                eligible_coins_per_asset
+            })
+            .collect();
+
+        dbg!(&eligible_coins);
+
+        q.iter()
+            .zip(eligible_coins.iter())
+            .map(|(Query { asset, amount, max }, eligible_coins)| {
+                // Take largest coins until:
+                // - the amount is reached
+                // - the max number of coins is reached
+
+                let mut sum = 0;
+                let selected_coins: Vec<_> = eligible_coins
+                    .iter()
+                    .rev()
+                    .take_while(|coin| {
+                        let cont = sum < *amount;
+                        sum += coin.amount;
+                        cont
+                    })
+                    .cloned()
+                    .collect();
+
+                dbg!(&selected_coins);
+                selected_coins
+            })
+            .collect()
     }
 }
 
@@ -207,15 +267,73 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeSet;
+    use std::collections::{BTreeMap, BTreeSet};
 
-    use coin_retrieval::{Coin, CoinDatabase};
+    use itertools::Itertools;
     use rand::seq::SliceRandom;
     use rocksdb::DB;
 
     use crate::{CoinDef, CoinIndexDef, CoinsManager};
 
-    mod coin_retrieval {
+    type UtxoIdDef = str;
+    type OwnerDef = str;
+    type AssetDef = str;
+    type AmountDef = u64;
+
+    pub type Coin = (
+        &'static UtxoIdDef,
+        &'static OwnerDef,
+        &'static AssetDef,
+        u64,
+    );
+    pub type CoinDatabase = &'static [Coin];
+
+    #[rustfmt::skip]
+    const COIN_DATABASE: CoinDatabase =
+        &[
+            ("UTXO00", "Alice", "BTC", 1),
+            ("UTXO01", "Alice", "ETH", 2),
+
+            ("UTXO02", "Bob", "BTC", 3),
+            ("UTXO03", "Bob", "LCK", 4),
+
+            ("UTXO04", "Charlie", "BTC", 5),
+
+            ("UTXO05", "Dave", "LCK", 10),
+            ("UTXO06", "Dave", "LCK", 10),
+            ("UTXO07", "Dave", "BTC", 11),
+            ("UTXO08", "Dave", "BTC", 11),
+
+            ("UTXO80", "Eve", "BTC", 100),
+            ("UTXO81", "Eve", "BTC", 75),
+            ("UTXO82", "Eve", "BTC", 50),
+            ("UTXO83", "Eve", "BTC", 25),
+            ("UTXO84", "Eve", "BTC", 5),
+            ("UTXO85", "Eve", "BTC", 4),
+            ("UTXO86", "Eve", "BTC", 3),
+            ("UTXO87", "Eve", "BTC", 2),
+            ("UTXO88", "Eve", "BTC", 1),
+            ("UTXO90", "Eve", "LCK", 100),
+            ("UTXO91", "Eve", "LCK", 75),
+            ("UTXO92", "Eve", "LCK", 50),
+            ("UTXO93", "Eve", "LCK", 25),
+            ("UTXO94", "Eve", "LCK", 5),
+            ("UTXO95", "Eve", "LCK", 4),
+            ("UTXO96", "Eve", "LCK", 3),
+            ("UTXO97", "Eve", "LCK", 2),
+            ("UTXO98", "Eve", "LCK", 1),
+
+            ("UTXO11", "Frank", "BTC", 1),
+            
+            ("UTXO12", "Grace", "BTC", 2),
+            ("UTXO13", "Grace", "BTC", 3),
+            ("UTXO14", "Grace", "ETH", 1),
+            ("UTXO15", "Grace", "ETH", 3),
+            ("UTXO16", "Grace", "BTC", 1),
+            ("UTXO17", "Grace", "ETH", 2),
+        ];
+
+    mod coins {
         use test_case::test_case;
 
         use crate::{
@@ -224,18 +342,7 @@ mod tests {
             CoinIndexDef,
         };
 
-        type UtxoIdDef = str;
-        type OwnerDef = str;
-        type AssetDef = str;
-        type AmountDef = u64;
-
-        pub type Coin = (
-            &'static UtxoIdDef,
-            &'static OwnerDef,
-            &'static AssetDef,
-            u64,
-        );
-        pub type CoinDatabase = &'static [Coin];
+        use super::{AmountDef, AssetDef, Coin, CoinDatabase, OwnerDef, UtxoIdDef, COIN_DATABASE};
 
         impl From<&(&UtxoIdDef, &OwnerDef, &AssetDef, AmountDef)> for CoinIndexDef {
             fn from(
@@ -258,35 +365,6 @@ mod tests {
             expected_coins: &'static [Coin],
             excluded_utxos: &'static str,
         }
-
-        #[rustfmt::skip]
-        const COIN_DATABASE: CoinDatabase =
-            &[
-                ("UTXO00", "Alice", "BTC", 1),
-                ("UTXO01", "Alice", "ETH", 2),
-    
-                ("UTXO02", "Bob", "BTC", 3),
-                ("UTXO03", "Bob", "LCK", 4),
-    
-                ("UTXO04", "Charlie", "BTC", 5),
-    
-                ("UTXO05", "Dave", "LCK", 10),
-                ("UTXO06", "Dave", "LCK", 10),
-                ("UTXO07", "Dave", "BTC", 11),
-                ("UTXO08", "Dave", "BTC", 11),
-    
-                ("UTXO09", "Eve", "BTC", 8),
-                ("UTXO10", "Eve", "ETH", 8),
-    
-                ("UTXO11", "Frank", "BTC", 1),
-                
-                ("UTXO12", "Grace", "BTC", 2),
-                ("UTXO13", "Grace", "BTC", 3),
-                ("UTXO14", "Grace", "ETH", 1),
-                ("UTXO15", "Grace", "ETH", 3),
-                ("UTXO16", "Grace", "BTC", 1),
-                ("UTXO17", "Grace", "ETH", 2),
-            ];
 
         const SINGLE_COIN_1: TestCase = TestCase {
             coins: COIN_DATABASE,
@@ -367,7 +445,7 @@ mod tests {
             const NO_EXCLUDED_UTXO_IDS: &[String] = &[];
 
             let cm = make_coin_manager(coins);
-            let actual_coins: Vec<_> = cm.get_coins(owner, asset, NO_EXCLUDED_UTXO_IDS);
+            let actual_coins: Vec<_> = cm.coins(owner, asset, NO_EXCLUDED_UTXO_IDS);
             assert_coins(&expected_coins, &actual_coins, &cm.main_db);
         }
 
@@ -422,9 +500,82 @@ mod tests {
                 .collect::<Vec<_>>();
 
             let cm = make_coin_manager(coins);
-            let actual_coins: Vec<_> = cm.get_coins(owner, asset, &excluded_utxo_ids);
+            let actual_coins: Vec<_> = cm.coins(owner, asset, &excluded_utxo_ids);
 
             assert_coins(&expected_coins, &actual_coins, &cm.main_db);
+        }
+    }
+
+    mod coins_to_spend {
+        use std::str::FromStr;
+
+        use crate::{tests::assert_coins_to_spend, Query};
+
+        use super::{assert_coins, make_coin_manager, Coin, CoinDatabase, COIN_DATABASE};
+        use test_case::test_case;
+
+        #[derive(Debug)]
+        struct TestCase {
+            coins: CoinDatabase,
+            owner: &'static str,
+            excluded_utxos: &'static str,
+            query: &'static [&'static str],
+            expected_coins: &'static [Coin],
+        }
+
+        const SINGLE_ASSET_MULTIPLE_COINS_WITHOUT_EXCLUSION: TestCase = TestCase {
+            coins: COIN_DATABASE,
+            owner: "Eve",
+            excluded_utxos: "",
+            query: &["BTC;150;-"],
+            expected_coins: &[("UTXO80", "Eve", "BTC", 100), ("UTXO81", "Eve", "BTC", 75)],
+        };
+
+        const SINGLE_ASSET_MULTIPLE_COINS_WITH_SINGLE_EXCLUSION: TestCase = TestCase {
+            coins: COIN_DATABASE,
+            owner: "Eve",
+            excluded_utxos: "UTXO80",
+            query: &["BTC;150;-"],
+            expected_coins: &[
+                ("UTXO81", "Eve", "BTC", 75),
+                ("UTXO82", "Eve", "BTC", 50),
+                ("UTXO83", "Eve", "BTC", 25),
+            ],
+        };
+
+        const SINGLE_ASSET_MULTIPLE_COINS_WITH_MULTIPLE_EXCLUSIONS: TestCase = TestCase {
+            coins: COIN_DATABASE,
+            owner: "Eve",
+            excluded_utxos: "UTXO80;UTXO81;UTXO82;UTXO83;UTXO84;UTXO85",
+            query: &["BTC;4;-"],
+            expected_coins: &[("UTXO86", "Eve", "BTC", 3), ("UTXO87", "Eve", "BTC", 2)],
+        };
+
+        #[test_case(SINGLE_ASSET_MULTIPLE_COINS_WITHOUT_EXCLUSION; "Multiple coins for single asset without excluded UTXOs")]
+        #[test_case(SINGLE_ASSET_MULTIPLE_COINS_WITH_SINGLE_EXCLUSION; "Multiple coins for single asset with single exclusion")]
+        #[test_case(SINGLE_ASSET_MULTIPLE_COINS_WITH_MULTIPLE_EXCLUSIONS; "Multiple coins for single asset with multiple exclusions")]
+        fn exclude_coin(
+            TestCase {
+                coins,
+                owner,
+                excluded_utxos,
+                query,
+                expected_coins,
+            }: TestCase,
+        ) {
+            let excluded_utxo_ids = excluded_utxos
+                .split(';')
+                .map(Into::into)
+                .collect::<Vec<_>>();
+
+            let query: Vec<Query> = query.iter().map(|s| Query::from_str(s).unwrap()).collect();
+
+            dbg!(&query);
+
+            let cm = make_coin_manager(coins);
+            let actual_coins: Vec<_> = cm.coins_to_spend(owner, &query, &excluded_utxo_ids);
+
+            assert_coins_to_spend(&expected_coins, &actual_coins, &cm.main_db);
         }
     }
 
@@ -462,5 +613,22 @@ mod tests {
 
         // Make sure that metadata are unique, ie. link to main DB is correct even for "identical" coins.
         assert_eq!(unique_metadata.len(), actual.len());
+    }
+
+    fn assert_coins_to_spend(expected: &[Coin], actual: &[Vec<CoinIndexDef>], main_db: &DB) {
+        let expected_grouped_by_asset = expected
+            .iter()
+            .map(Into::into)
+            .into_group_map_by(|coin: &CoinIndexDef| coin.asset.clone());
+        dbg!(&expected_grouped_by_asset);
+
+        let actual_grouped_by_asset = actual
+            .iter()
+            .map(|coins| coins.iter().cloned())
+            .flatten()
+            .into_group_map_by(|coin: &CoinIndexDef| coin.asset.clone());
+        dbg!(&actual_grouped_by_asset);
+
+        assert_eq!(expected_grouped_by_asset, actual_grouped_by_asset);
     }
 }
