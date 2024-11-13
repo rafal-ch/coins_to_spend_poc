@@ -204,13 +204,10 @@ impl CoinsManager {
 
         dbg!(&eligible_coins);
 
+        // TODO: Make this more readable
         q.iter()
             .zip(eligible_coins.iter())
             .map(|(Query { asset, amount, max }, eligible_coins)| {
-                // Take largest coins until:
-                // - the amount is reached
-                // - the max number of coins is reached
-
                 let mut sum = 0;
                 let selected_coins: Vec<_> = eligible_coins
                     .iter()
@@ -224,7 +221,11 @@ impl CoinsManager {
                     .collect();
 
                 dbg!(&selected_coins);
-                selected_coins
+                if sum >= *amount {
+                    selected_coins
+                } else {
+                    vec![]
+                }
             })
             .collect()
     }
@@ -531,6 +532,20 @@ mod tests {
             expected_coins: &[("UTXO80", "Eve", "BTC", 100), ("UTXO81", "Eve", "BTC", 75)],
         };
 
+        const MULTIPLE_ASSETS_MULTIPLE_COINS_WITHOUT_EXCLUSION: TestCase = TestCase {
+            coins: COIN_DATABASE,
+            owner: "Eve",
+            excluded_utxos: "",
+            query: &["BTC;150;-", "LCK;200;-"],
+            expected_coins: &[
+                ("UTXO80", "Eve", "BTC", 100),
+                ("UTXO81", "Eve", "BTC", 75),
+                ("UTXO90", "Eve", "LCK", 100),
+                ("UTXO91", "Eve", "LCK", 75),
+                ("UTXO92", "Eve", "LCK", 50),
+            ],
+        };
+
         const SINGLE_ASSET_MULTIPLE_COINS_WITH_SINGLE_EXCLUSION: TestCase = TestCase {
             coins: COIN_DATABASE,
             owner: "Eve",
@@ -543,6 +558,19 @@ mod tests {
             ],
         };
 
+        const MULTIPLE_ASSETS_MULTIPLE_COINS_WITH_EXCLUSION: TestCase = TestCase {
+            coins: COIN_DATABASE,
+            owner: "Eve",
+            excluded_utxos: "UTXO90;UTXO81",
+            query: &["BTC;150;-", "LCK;101;-"],
+            expected_coins: &[
+                ("UTXO80", "Eve", "BTC", 100),
+                ("UTXO82", "Eve", "BTC", 50),
+                ("UTXO91", "Eve", "LCK", 75),
+                ("UTXO92", "Eve", "LCK", 50),
+            ],
+        };
+
         const SINGLE_ASSET_MULTIPLE_COINS_WITH_MULTIPLE_EXCLUSIONS: TestCase = TestCase {
             coins: COIN_DATABASE,
             owner: "Eve",
@@ -551,9 +579,39 @@ mod tests {
             expected_coins: &[("UTXO86", "Eve", "BTC", 3), ("UTXO87", "Eve", "BTC", 2)],
         };
 
+        const CAN_NOT_SATISFY_REQUEST_NOT_ENOUGH_VALUE: TestCase = TestCase {
+            coins: COIN_DATABASE,
+            owner: "Eve",
+            excluded_utxos: "UTXO80;UTXO81;UTXO82;UTXO83;UTXO84;UTXO85",
+            query: &["BTC;1000;-"],
+            expected_coins: &[],
+        };
+
+        const CAN_NOT_SATISFY_REQUEST_NOT_ENOUGH_VALUE_FOR_SINGLE_ASSET: TestCase = TestCase {
+            coins: COIN_DATABASE,
+            owner: "Eve",
+            excluded_utxos: "UTXO90;UTXO81",
+            query: &["BTC;150;-", "LCK;100000;-"],
+            expected_coins: &[("UTXO80", "Eve", "BTC", 100), ("UTXO82", "Eve", "BTC", 50)],
+        };
+
+        const CAN_NOT_SATISFY_REQUEST_NOT_ENOUGH_VALUE_FOR_ANY_OF_MULTIPLE_ASSETS: TestCase =
+            TestCase {
+                coins: COIN_DATABASE,
+                owner: "Eve",
+                excluded_utxos: "UTXO90;UTXO81",
+                query: &["BTC;100000;-", "LCK;100000;-"],
+                expected_coins: &[],
+            };
+
         #[test_case(SINGLE_ASSET_MULTIPLE_COINS_WITHOUT_EXCLUSION; "Multiple coins for single asset without excluded UTXOs")]
+        #[test_case(MULTIPLE_ASSETS_MULTIPLE_COINS_WITHOUT_EXCLUSION; "Multiple coins for multiple assets without excluded UTXOs")]
         #[test_case(SINGLE_ASSET_MULTIPLE_COINS_WITH_SINGLE_EXCLUSION; "Multiple coins for single asset with single exclusion")]
+        #[test_case(MULTIPLE_ASSETS_MULTIPLE_COINS_WITH_EXCLUSION; "Multiple coins for multiple assets with single exclusion")]
         #[test_case(SINGLE_ASSET_MULTIPLE_COINS_WITH_MULTIPLE_EXCLUSIONS; "Multiple coins for single asset with multiple exclusions")]
+        #[test_case(CAN_NOT_SATISFY_REQUEST_NOT_ENOUGH_VALUE; "Can not satisfy request due to not enough value for one and only asset")]
+        #[test_case(CAN_NOT_SATISFY_REQUEST_NOT_ENOUGH_VALUE_FOR_SINGLE_ASSET; "Can not satisfy request due to not enough value for one of multiple assets")]
+        #[test_case(CAN_NOT_SATISFY_REQUEST_NOT_ENOUGH_VALUE_FOR_ANY_OF_MULTIPLE_ASSETS; "Can not satisfy request due to not enough value for each one of multiple assets")]
         fn exclude_coin(
             TestCase {
                 coins,
