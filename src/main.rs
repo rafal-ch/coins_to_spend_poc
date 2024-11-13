@@ -526,7 +526,17 @@ mod tests {
                 owner: "Eve",
                 excluded_utxos: "",
                 query: &["BTC;150;-"],
-                expected_coins: &[("UTXO80", "Eve", "BTC", 100), ("UTXO81", "Eve", "BTC", 75)],
+                expected_coins: &[
+                    ("UTXO80", "Eve", "BTC", 100),
+                    ("UTXO81", "Eve", "BTC", 75),
+                    ("UTXO88", "Eve", "BTC", 1),
+                    ("UTXO87", "Eve", "BTC", 2),
+                    ("UTXO86", "Eve", "BTC", 3),
+                    ("UTXO85", "Eve", "BTC", 4),
+                    ("UTXO84", "Eve", "BTC", 5),
+                    ("UTXO83", "Eve", "BTC", 25),
+                    ("UTXO82", "Eve", "BTC", 50),
+                ],
             };
 
             pub(super) const MULTIPLE_ASSETS: TestCase = TestCase {
@@ -537,7 +547,22 @@ mod tests {
                 expected_coins: &[
                     ("UTXO80", "Eve", "BTC", 100),
                     ("UTXO81", "Eve", "BTC", 75),
+                    ("UTXO88", "Eve", "BTC", 1),
+                    ("UTXO87", "Eve", "BTC", 2),
+                    ("UTXO86", "Eve", "BTC", 3),
+                    ("UTXO85", "Eve", "BTC", 4),
+                    ("UTXO84", "Eve", "BTC", 5),
+                    ("UTXO83", "Eve", "BTC", 25),
+                    ("UTXO82", "Eve", "BTC", 50),
                     ("UTXO90", "Eve", "LCK", 100),
+                    ("UTXO98", "Eve", "LCK", 1),
+                    ("UTXO97", "Eve", "LCK", 2),
+                    ("UTXO96", "Eve", "LCK", 3),
+                    ("UTXO95", "Eve", "LCK", 4),
+                    ("UTXO94", "Eve", "LCK", 5),
+                    ("UTXO93", "Eve", "LCK", 25),
+                    ("UTXO92", "Eve", "LCK", 50),
+                    ("UTXO91", "Eve", "LCK", 75),
                 ],
             };
         }
@@ -556,6 +581,11 @@ mod tests {
                     ("UTXO81", "Eve", "BTC", 75),
                     ("UTXO82", "Eve", "BTC", 50),
                     ("UTXO83", "Eve", "BTC", 25),
+                    ("UTXO88", "Eve", "BTC", 1),
+                    ("UTXO87", "Eve", "BTC", 2),
+                    ("UTXO86", "Eve", "BTC", 3),
+                    ("UTXO85", "Eve", "BTC", 4),
+                    ("UTXO84", "Eve", "BTC", 5),
                 ],
             };
 
@@ -568,6 +598,8 @@ mod tests {
                     ("UTXO84", "Eve", "BTC", 5),
                     ("UTXO85", "Eve", "BTC", 4),
                     ("UTXO86", "Eve", "BTC", 3),
+                    ("UTXO88", "Eve", "BTC", 1),
+                    ("UTXO87", "Eve", "BTC", 2),
                 ],
             };
 
@@ -580,8 +612,20 @@ mod tests {
                     ("UTXO80", "Eve", "BTC", 100),
                     ("UTXO81", "Eve", "BTC", 75),
                     ("UTXO82", "Eve", "BTC", 50),
+                    ("UTXO88", "Eve", "BTC", 1),
+                    ("UTXO87", "Eve", "BTC", 2),
+                    ("UTXO86", "Eve", "BTC", 3),
+                    ("UTXO85", "Eve", "BTC", 4),
+                    ("UTXO84", "Eve", "BTC", 5),
+                    ("UTXO83", "Eve", "BTC", 25),
                     ("UTXO91", "Eve", "LCK", 75),
                     ("UTXO92", "Eve", "LCK", 50),
+                    ("UTXO98", "Eve", "LCK", 1),
+                    ("UTXO97", "Eve", "LCK", 2),
+                    ("UTXO96", "Eve", "LCK", 3),
+                    ("UTXO95", "Eve", "LCK", 4),
+                    ("UTXO94", "Eve", "LCK", 5),
+                    ("UTXO93", "Eve", "LCK", 25),
                 ],
             };
         }
@@ -637,6 +681,11 @@ mod tests {
                     ("UTXO91", "Eve", "LCK", 75),
                     ("UTXO92", "Eve", "LCK", 50),
                     ("UTXO93", "Eve", "LCK", 25),
+                    ("UTXO98", "Eve", "LCK", 1),
+                    ("UTXO97", "Eve", "LCK", 2),
+                    ("UTXO96", "Eve", "LCK", 3),
+                    ("UTXO95", "Eve", "LCK", 4),
+                    ("UTXO94", "Eve", "LCK", 5),
                 ],
             };
         }
@@ -746,6 +795,22 @@ mod tests {
                     ("UTXO82", "Eve", "BTC", 50),
                 ],
             };
+
+            pub(super) const NO_EXCLUDED_COINS_IN_DUST: TestCase = TestCase {
+                coins: COIN_DATABASE,
+                owner: "Eve",
+                excluded_utxos: "UTXO98;UTXO95",
+                query: &["LCK;200;-"],
+                expected_coins: &[
+                    ("UTXO90", "Eve", "LCK", 100),
+                    ("UTXO91", "Eve", "LCK", 75),
+                    ("UTXO92", "Eve", "LCK", 50),
+                    ("UTXO97", "Eve", "LCK", 2),
+                    ("UTXO96", "Eve", "LCK", 3),
+                    ("UTXO94", "Eve", "LCK", 5),
+                    ("UTXO93", "Eve", "LCK", 25),
+                ],
+            };
         }
 
         #[test_case(without_exclusion_without_limits::SINGLE_ASSET)]
@@ -764,6 +829,7 @@ mod tests {
         #[test_case(dust_coins::FILLING_WITH_DUST_DOES_NOT_PRODUCE_DUPLICATES)]
         #[test_case(dust_coins::ZERO_DUST_IF_ALL_COINS_USED)]
         #[test_case(dust_coins::ZERO_DUST_IF_ALL_SLOTS_FILLED)]
+        #[test_case(dust_coins::NO_EXCLUDED_COINS_IN_DUST)]
 
         fn exclude_coin(
             TestCase {
