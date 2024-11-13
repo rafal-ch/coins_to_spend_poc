@@ -202,26 +202,31 @@ impl CoinsManager {
             })
             .collect();
 
-        dbg!(&eligible_coins);
+        //dbg!(&eligible_coins);
 
         // TODO: Make this more readable
         q.iter()
             .zip(eligible_coins.iter())
             .map(|(Query { asset, amount, max }, eligible_coins)| {
                 let mut sum = 0;
+                let mut coins_taken = 0;
                 let selected_coins: Vec<_> = eligible_coins
                     .iter()
                     .rev()
-                    .take_while(|coin| {
-                        let cont = sum < *amount;
+                    .enumerate()
+                    .take(max.unwrap_or(std::u32::MAX) as usize)
+                    .take_while(|(index, coin)| {
+                        let should_continue = sum < *amount;
                         sum += coin.amount;
-                        cont
+                        coins_taken = index + 1;
+                        should_continue
                     })
+                    .map(|(_, coin)| coin)
                     .cloned()
                     .collect();
 
-                dbg!(&selected_coins);
-                if sum >= *amount {
+                //dbg!(&selected_coins);
+                if sum >= *amount && coins_taken <= max.unwrap_or(std::u32::MAX) as usize {
                     selected_coins
                 } else {
                     vec![]
@@ -604,14 +609,33 @@ mod tests {
                 expected_coins: &[],
             };
 
-        #[test_case(SINGLE_ASSET_MULTIPLE_COINS_WITHOUT_EXCLUSION; "Multiple coins for single asset without excluded UTXOs")]
-        #[test_case(MULTIPLE_ASSETS_MULTIPLE_COINS_WITHOUT_EXCLUSION; "Multiple coins for multiple assets without excluded UTXOs")]
-        #[test_case(SINGLE_ASSET_MULTIPLE_COINS_WITH_SINGLE_EXCLUSION; "Multiple coins for single asset with single exclusion")]
-        #[test_case(MULTIPLE_ASSETS_MULTIPLE_COINS_WITH_EXCLUSION; "Multiple coins for multiple assets with single exclusion")]
-        #[test_case(SINGLE_ASSET_MULTIPLE_COINS_WITH_MULTIPLE_EXCLUSIONS; "Multiple coins for single asset with multiple exclusions")]
-        #[test_case(CAN_NOT_SATISFY_REQUEST_NOT_ENOUGH_VALUE; "Can not satisfy request due to not enough value for one and only asset")]
-        #[test_case(CAN_NOT_SATISFY_REQUEST_NOT_ENOUGH_VALUE_FOR_SINGLE_ASSET; "Can not satisfy request due to not enough value for one of multiple assets")]
-        #[test_case(CAN_NOT_SATISFY_REQUEST_NOT_ENOUGH_VALUE_FOR_ANY_OF_MULTIPLE_ASSETS; "Can not satisfy request due to not enough value for each one of multiple assets")]
+        const CAN_NOT_SATISFY_REQUEST_COIN_COUNT_LIMIT_SINGLE_ASSET_NO_EXCLUSION: TestCase =
+            TestCase {
+                coins: COIN_DATABASE,
+                owner: "Eve",
+                excluded_utxos: "",
+                query: &["BTC;200;2"],
+                expected_coins: &[],
+            };
+
+        const CAN_FIT_THE_EXACT_VALUE_AND_COUNT_LIMIT: TestCase = TestCase {
+            coins: COIN_DATABASE,
+            owner: "Eve",
+            excluded_utxos: "",
+            query: &["BTC;175;2"],
+            expected_coins: &[("UTXO80", "Eve", "BTC", 100), ("UTXO81", "Eve", "BTC", 75)],
+        };
+
+        #[test_case(SINGLE_ASSET_MULTIPLE_COINS_WITHOUT_EXCLUSION)]
+        #[test_case(MULTIPLE_ASSETS_MULTIPLE_COINS_WITHOUT_EXCLUSION)]
+        #[test_case(SINGLE_ASSET_MULTIPLE_COINS_WITH_SINGLE_EXCLUSION)]
+        #[test_case(MULTIPLE_ASSETS_MULTIPLE_COINS_WITH_EXCLUSION)]
+        #[test_case(SINGLE_ASSET_MULTIPLE_COINS_WITH_MULTIPLE_EXCLUSIONS)]
+        #[test_case(CAN_NOT_SATISFY_REQUEST_NOT_ENOUGH_VALUE)]
+        #[test_case(CAN_NOT_SATISFY_REQUEST_NOT_ENOUGH_VALUE_FOR_SINGLE_ASSET)]
+        #[test_case(CAN_NOT_SATISFY_REQUEST_NOT_ENOUGH_VALUE_FOR_ANY_OF_MULTIPLE_ASSETS)]
+        #[test_case(CAN_NOT_SATISFY_REQUEST_COIN_COUNT_LIMIT_SINGLE_ASSET_NO_EXCLUSION)]
+        #[test_case(CAN_FIT_THE_EXACT_VALUE_AND_COUNT_LIMIT)]
         fn exclude_coin(
             TestCase {
                 coins,
