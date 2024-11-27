@@ -1089,16 +1089,16 @@ mod tests {
     where
         I: Iterator<Item = &'a u64> + 'a,
     {
-        let mut small_coins_total = 0;
-        let small_coins: Vec<&u64> = coins_iter_back
+        let mut dust_coins_total = 0;
+        let dust_coins: Vec<&u64> = coins_iter_back
             .take(max_dust_count as usize)
             .take_while(move |item| *item != last_big_coin)
             .map(|item| {
-                small_coins_total += *item as u128;
+                dust_coins_total += *item as u128;
                 item
             })
             .collect();
-        (small_coins_total, small_coins)
+        (dust_coins_total, dust_coins)
     }
 
     fn max_dust_count(max: u8, big_coins: &Vec<&u64>, rng: &mut ThreadRng) -> u8 {
