@@ -263,7 +263,7 @@ mod tests {
     use std::collections::{BTreeMap, BTreeSet};
 
     use itertools::Itertools;
-    use rand::seq::SliceRandom;
+    use rand::{rngs::ThreadRng, seq::SliceRandom, Rng};
     use rocksdb::DB;
 
     use crate::{CoinDef, CoinIndexDef, CoinsManager};
@@ -907,5 +907,235 @@ mod tests {
         dbg!(&actual_grouped_by_asset);
 
         assert_eq!(expected_grouped_by_asset, actual_grouped_by_asset);
+    }
+
+    fn select_coins<'a, I, J>(
+        mut smallest: I,
+        mut biggest: J,
+        total: u64,
+        max: u8,
+        rng: &mut ThreadRng,
+    ) -> Option<()>
+    where
+        I: Iterator<Item = &'a u64>,
+        J: Iterator<Item = &'a u64>,
+    {
+        let mut sum = 0;
+        let mut count = 0;
+        let big_end = loop {
+            let maybe_biggest_num = biggest.next();
+            match maybe_biggest_num {
+                Some(biggest_num) => {
+                    sum += biggest_num;
+                    count += 1;
+                    println!(
+                        "Added biggest: {}, total={}/{total}, count={}/{max}",
+                        biggest_num, sum, count
+                    );
+                    if sum >= total {
+                        break Some(biggest);
+                    }
+                }
+                None => break None,
+            }
+        };
+
+        if sum < total {
+            // Unable to satisfy the total amount with all coins.
+            return None;
+        }
+
+        let free_slots = max - count;
+        let to_be_filled_with_dust = rng.gen_range(2..free_slots);
+        println!(
+            "Free slots: {}. I will fill {} of them with dust",
+            free_slots, to_be_filled_with_dust
+        );
+
+        let small_end = if to_be_filled_with_dust > 0 {
+            let mut dust_sum = 0;
+            let mut dust_count = 0;
+            loop {
+                let maybe_smallest_num = smallest.next();
+                match maybe_smallest_num {
+                    Some(smallest_num) => {
+                        dust_count += 1;
+                        dust_sum += smallest_num;
+                        println!("Added smallest: {}, total = {dust_sum}", smallest_num);
+                        if dust_count >= to_be_filled_with_dust {
+                            break Some(smallest);
+                        }
+                    }
+                    None => break None,
+                }
+            }
+        } else {
+            None
+        };
+
+        todo!()
+    }
+
+    fn take_bigs<'a, I>(
+        mut coins_iter: I,
+        total_threshold: u128,
+        max: u8,
+    ) -> impl Iterator<Item = &'a u64>
+    where
+        I: Iterator<Item = &'a u64>,
+    {
+        let mut sum = 0;
+        coins_iter
+            .take_while(move |item| {
+                let have_enough = sum >= total_threshold;
+                if have_enough {
+                    false
+                } else {
+                    sum = sum.saturating_add(**item as u128);
+                    true
+                }
+            })
+            .take(max as usize)
+    }
+
+    fn take_dust<'a, I>(mut coins_iter: I, stop_at: u64, max: u8) -> impl Iterator<Item = &'a u64>
+    where
+        I: Iterator<Item = &'a u64>,
+    {
+        coins_iter
+            .take_while(move |item| **item != stop_at)
+            .take(max as usize)
+    }
+
+    /*
+    fn select<'a, I>(
+        coins_iter: I,
+        total: u64,
+        max: u8,
+        rng: &mut ThreadRng,
+    ) -> impl Iterator<Item = u64>
+    where
+        I: DoubleEndedIterator<Item = &'a u64> + Clone,
+    {
+        let big_coins: Vec<_> = take_bigs(coins_iter.clone(), total, max).collect();
+        println!("Big coins: {:?}", big_coins);
+        let last_big_coin = big_coins.last().unwrap();
+        println!("Last big coin: {}", last_big_coin);
+        let free_slots = max - big_coins.len() as u8;
+        println!("Free slots: {}", free_slots);
+        let max_dust_count = rng.gen_range(1..free_slots);
+        //let max_dust_count = free_slots;
+        println!("Will get at most {max_dust_count} dust coins");
+        let small_coins: Vec<_> = take_dust(coins_iter.rev(), **last_big_coin, max_dust_count)
+            .map(|x| *x)
+            .collect();
+        println!("Small coins: {:?}", small_coins);
+        let mut sum_of_small_coins: u64 = small_coins.iter().sum();
+        println!("Sum of small coins: {}", sum_of_small_coins);
+        let adjusted_big_coins: Vec<_> = big_coins
+            .iter()
+            .skip_while(|item| {
+                let maybe_new_value = sum_of_small_coins.checked_sub(***item);
+                match maybe_new_value {
+                    Some(new_value) => {
+                        sum_of_small_coins = new_value;
+                        true
+                    }
+                    None => false,
+                }
+            })
+            .map(|x| **x)
+            .collect();
+        println!("Adjusted big coins: {:?}", adjusted_big_coins);
+        adjusted_big_coins
+            .into_iter()
+            .chain(small_coins.into_iter())
+    }
+    */
+
+    fn select_1<'a, I>(
+        coins_iter: I,
+        total: u128,
+        max: u8,
+        rng: &mut ThreadRng,
+    ) -> Box<dyn Iterator<Item = u64>>
+    where
+        I: DoubleEndedIterator<Item = &'a u64> + Clone,
+    {
+        let big_coins: Vec<_> = take_bigs(coins_iter.clone(), total, max).collect();
+        let sum_of_big_coins = big_coins
+            .iter()
+            .fold(0u128, |acc, item| acc.saturating_add(**item as u128));
+        if sum_of_big_coins < total {
+            // We cannot satisfy the request with available coins.
+            return Box::new(std::iter::empty());
+        }
+
+        let free_slots = max.saturating_sub(big_coins.len() as u8);
+        let Some(last_big_coin) = big_coins.last() else {
+            // No coins.
+            return Box::new(std::iter::empty());
+        };
+
+        let max_dust_count = rng.gen_range(1..free_slots);
+        let small_coins: Vec<_> = take_dust(coins_iter.rev(), **last_big_coin, max_dust_count)
+            .map(|x| *x)
+            .collect();
+        let mut sum_of_small_coins: u64 = small_coins.iter().sum();
+        let adjusted_big_coins: Vec<_> = big_coins
+            .iter()
+            .skip_while(|item| {
+                let maybe_new_value = sum_of_small_coins.checked_sub(***item);
+                match maybe_new_value {
+                    Some(new_value) => {
+                        sum_of_small_coins = new_value;
+                        true
+                    }
+                    None => false,
+                }
+            })
+            .map(|x| **x)
+            .collect();
+        Box::new(
+            adjusted_big_coins
+                .into_iter()
+                .chain(small_coins.into_iter()),
+        )
+    }
+
+    #[test]
+    fn selection_algo() {
+        let coins = vec![15, 10, 8, 7, 6, 5, 4, 3, 2, 1];
+        let mut rng = rand::thread_rng();
+
+        let total = 25;
+        let max = 13;
+
+        let result: Vec<_> = select_1(coins.iter(), total, max, &mut rng).collect();
+        dbg!(&result);
+    }
+
+    #[test]
+    fn selection_algo_can_not_satisfy() {
+        let coins = vec![15, 10, 8, 7, 6, 5, 4, 3, 2, 1];
+        let mut rng = rand::thread_rng();
+
+        let total = 20000;
+        let max = 13;
+
+        let result: Vec<_> = select_1(coins.iter(), total, max, &mut rng).collect();
+        dbg!(&result);
+    }
+
+    #[test]
+    fn selection_algo_no_coins() {
+        let coins = vec![];
+        let mut rng = rand::thread_rng();
+
+        let total = 1;
+        let max = 13;
+
+        let result: Vec<_> = select_1(coins.iter(), total, max, &mut rng).collect();
+        dbg!(&result);
     }
 }
