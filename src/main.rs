@@ -1031,14 +1031,16 @@ mod tests {
     }
     */
 
-    fn select_1<'a, I>(
+    fn select_1<'a, I, J>(
         coins_iter: I,
+        coins_iter_back: J,
         total: u128,
         max: u8,
         rng: &mut ThreadRng,
     ) -> Box<dyn Iterator<Item = u64>>
     where
-        I: DoubleEndedIterator<Item = &'a u64> + Clone,
+        I: Iterator<Item = &'a u64>,
+        J: Iterator<Item = &'a u64>,
     {
         if total == 0 {
             return Box::new(std::iter::empty());
@@ -1046,7 +1048,6 @@ mod tests {
 
         let mut big_coins_total = 0;
         let big_coins: Vec<_> = coins_iter
-            .clone()
             .take_while(|item| {
                 let have_enough = big_coins_total >= total;
                 if have_enough {
@@ -1075,8 +1076,7 @@ mod tests {
         };
 
         let mut small_coins_total = 0;
-        let small_coins: Vec<u64> = coins_iter
-            .rev()
+        let small_coins: Vec<u64> = coins_iter_back
             .take_while(move |item| item != last_big_coin)
             .take(max_dust_count as usize)
             .map(|item| {
@@ -1114,7 +1114,8 @@ mod tests {
         let total = 61;
         let max = 10;
 
-        let result: Vec<_> = select_1(coins.iter(), total, max, &mut rng).collect();
+        let result: Vec<_> =
+            select_1(coins.iter(), coins.iter().rev(), total, max, &mut rng).collect();
         dbg!(&result);
     }
 
@@ -1126,7 +1127,8 @@ mod tests {
         let total = 25;
         let max = 13;
 
-        let result: Vec<_> = select_1(coins.iter(), total, max, &mut rng).collect();
+        let result: Vec<_> =
+            select_1(coins.iter(), coins.iter().rev(), total, max, &mut rng).collect();
         dbg!(&result);
     }
 
@@ -1138,7 +1140,8 @@ mod tests {
         let total = 20000;
         let max = 13;
 
-        let result: Vec<_> = select_1(coins.iter(), total, max, &mut rng).collect();
+        let result: Vec<_> =
+            select_1(coins.iter(), coins.iter().rev(), total, max, &mut rng).collect();
         dbg!(&result);
     }
 
@@ -1150,7 +1153,8 @@ mod tests {
         let total = 1;
         let max = 13;
 
-        let result: Vec<_> = select_1(coins.iter(), total, max, &mut rng).collect();
+        let result: Vec<_> =
+            select_1(coins.iter(), coins.iter().rev(), total, max, &mut rng).collect();
         dbg!(&result);
     }
 }
