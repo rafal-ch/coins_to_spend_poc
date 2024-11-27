@@ -1040,17 +1040,17 @@ mod tests {
         total: u128,
         max: u8,
         rng: &mut ThreadRng,
-    ) -> Box<dyn Iterator<Item = u64>>
+    ) -> Box<dyn Iterator<Item = &'a u64> + 'a>
     where
-        I: Iterator<Item = &'a u64>,
-        J: Iterator<Item = &'a u64>,
+        I: Iterator<Item = &'a u64> + 'a,
+        J: Iterator<Item = &'a u64> + 'a,
     {
         if total == 0 {
             return Box::new(std::iter::empty());
         }
 
         let mut big_coins_total = 0;
-        let big_coins: Vec<_> = coins_iter
+        let big_coins: Vec<&u64> = coins_iter
             .take_while(|item| {
                 let have_enough = big_coins_total >= total;
                 if have_enough {
@@ -1079,30 +1079,27 @@ mod tests {
         };
 
         let mut small_coins_total = 0;
-        let small_coins: Vec<u64> = coins_iter_back
+        let small_coins: Vec<&u64> = coins_iter_back
             .take_while(move |item| item != last_big_coin)
             .take(max_dust_count as usize)
             .map(|item| {
                 small_coins_total += *item as u128;
-                *item
+                item
             })
             .collect();
 
-        let adjusted_big_coins: Vec<u64> = big_coins
-            .into_iter()
-            .skip_while(|item| {
-                let maybe_new_value = small_coins_total.checked_sub(**item as u128);
-                match maybe_new_value {
-                    Some(new_value) => {
-                        small_coins_total = new_value;
-                        true
-                    }
-                    None => false,
+        let adjusted_big_coins = big_coins.into_iter().skip_while(move |item| {
+            let maybe_new_value = small_coins_total.checked_sub(**item as u128);
+            match maybe_new_value {
+                Some(new_value) => {
+                    small_coins_total = new_value;
+                    true
                 }
-            })
-            .copied()
-            .collect();
-        Box::new(adjusted_big_coins.into_iter().chain(small_coins))
+                None => false,
+            }
+        });
+
+        Box::new(adjusted_big_coins.chain(small_coins))
     }
 
     #[test]
