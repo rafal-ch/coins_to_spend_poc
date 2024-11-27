@@ -1104,7 +1104,7 @@ mod tests {
         let free_slots = max.saturating_sub(big_coins.len() as u8);
         (free_slots == 0)
             .then_some(0)
-            .unwrap_or_else(|| rng.gen_range(0..free_slots))
+            .unwrap_or_else(|| rng.gen_range(0..=free_slots))
     }
 
     fn big_coins<'a, I>(coins_iter: I, total: u128, max: u8) -> (u128, Vec<&'a u64>)
