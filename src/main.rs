@@ -1045,7 +1045,7 @@ mod tests {
         I: Iterator<Item = &'a u64> + 'a,
         J: Iterator<Item = &'a u64> + 'a,
     {
-        if total == 0 {
+        if total == 0 && max == 0 {
             return Box::new(std::iter::empty());
         }
 
@@ -1054,6 +1054,7 @@ mod tests {
             return Box::new(std::iter::empty());
         }
         let Some(last_selected_big_coin) = big_coins.last() else {
+            // Should never happen.
             return Box::new(std::iter::empty());
         };
 
@@ -1061,11 +1062,11 @@ mod tests {
         let (dust_coins_total, dust_coins) =
             dust_coins(coins_iter_back, last_selected_big_coin, max_dust_count);
 
-        let retained_big_coins_iter = remove_big_coins_up_to_amount(big_coins, dust_coins_total);
+        let retained_big_coins_iter = skip_big_coins_up_to_amount(big_coins, dust_coins_total);
         Box::new(retained_big_coins_iter.chain(dust_coins))
     }
 
-    fn remove_big_coins_up_to_amount<'a>(
+    fn skip_big_coins_up_to_amount<'a>(
         big_coins: impl IntoIterator<Item = &'a u64>,
         mut dust_coins_total: u128,
     ) -> impl Iterator<Item = &'a u64> {
@@ -1101,10 +1102,7 @@ mod tests {
     }
 
     fn max_dust_count(max: u8, big_coins: &Vec<&u64>, rng: &mut ThreadRng) -> u8 {
-        let free_slots = max.saturating_sub(big_coins.len() as u8);
-        (free_slots == 0)
-            .then_some(0)
-            .unwrap_or_else(|| rng.gen_range(0..=free_slots))
+        rng.gen_range(0..=max.saturating_sub(big_coins.len() as u8))
     }
 
     fn big_coins<'a, I>(coins_iter: I, total: u128, max: u8) -> (u128, Vec<&'a u64>)
