@@ -1049,57 +1049,81 @@ mod tests {
             return Box::new(std::iter::empty());
         }
 
-        let mut big_coins_total = 0;
-        let big_coins: Vec<&u64> = coins_iter
-            .take_while(|item| {
-                let have_enough = big_coins_total >= total;
-                if have_enough {
-                    false
-                } else {
-                    big_coins_total = big_coins_total.saturating_add(**item as u128);
-                    true
-                }
-            })
-            .take(max as usize)
-            .collect();
-
+        let (big_coins_total, big_coins) = big_coins(coins_iter, total, max);
         if big_coins_total < total {
             return Box::new(std::iter::empty());
         }
-
-        let Some(last_big_coin) = big_coins.last() else {
+        let Some(last_selected_big_coin) = big_coins.last() else {
             return Box::new(std::iter::empty());
         };
 
-        let free_slots = max.saturating_sub(big_coins.len() as u8);
-        let max_dust_count = if free_slots == 0 {
-            0
-        } else {
-            rng.gen_range(0..free_slots)
-        };
+        let max_dust_count = max_dust_count(max, &big_coins, rng);
+        let (dust_coins_total, dust_coins) =
+            dust_coins(coins_iter_back, last_selected_big_coin, max_dust_count);
 
+        let retained_big_coins_iter = remove_big_coins_up_to_amount(big_coins, dust_coins_total);
+        Box::new(retained_big_coins_iter.chain(dust_coins))
+    }
+
+    fn remove_big_coins_up_to_amount<'a>(
+        big_coins: impl IntoIterator<Item = &'a u64>,
+        mut dust_coins_total: u128,
+    ) -> impl Iterator<Item = &'a u64> {
+        big_coins.into_iter().skip_while(move |item| {
+            dust_coins_total
+                .checked_sub(**item as u128)
+                .and_then(|new_value| {
+                    dust_coins_total = new_value;
+                    Some(true)
+                })
+                .unwrap_or_default()
+        })
+    }
+
+    fn dust_coins<'a, I>(
+        coins_iter_back: I,
+        last_big_coin: &'a u64,
+        max_dust_count: u8,
+    ) -> (u128, Vec<&'a u64>)
+    where
+        I: Iterator<Item = &'a u64> + 'a,
+    {
         let mut small_coins_total = 0;
         let small_coins: Vec<&u64> = coins_iter_back
-            .take_while(move |item| item != last_big_coin)
             .take(max_dust_count as usize)
+            .take_while(move |item| *item != last_big_coin)
             .map(|item| {
                 small_coins_total += *item as u128;
                 item
             })
             .collect();
+        (small_coins_total, small_coins)
+    }
 
-        let adjusted_big_coins = big_coins.into_iter().skip_while(move |item| {
-            let maybe_new_value = small_coins_total.checked_sub(**item as u128);
-            match maybe_new_value {
-                Some(new_value) => {
-                    small_coins_total = new_value;
-                    true
-                }
-                None => false,
-            }
-        });
+    fn max_dust_count(max: u8, big_coins: &Vec<&u64>, rng: &mut ThreadRng) -> u8 {
+        let free_slots = max.saturating_sub(big_coins.len() as u8);
+        (free_slots == 0)
+            .then_some(0)
+            .unwrap_or_else(|| rng.gen_range(0..free_slots))
+    }
 
-        Box::new(adjusted_big_coins.chain(small_coins))
+    fn big_coins<'a, I>(coins_iter: I, total: u128, max: u8) -> (u128, Vec<&'a u64>)
+    where
+        I: Iterator<Item = &'a u64> + 'a,
+    {
+        let mut big_coins_total = 0;
+        let big_coins: Vec<&u64> = coins_iter
+            .take(max as usize)
+            .take_while(|item| {
+                (big_coins_total >= total)
+                    .then_some(false)
+                    .unwrap_or_else(|| {
+                        big_coins_total += **item as u128;
+                        true
+                    })
+            })
+            .collect();
+        (big_coins_total, big_coins)
     }
 
     #[test]
@@ -1122,6 +1146,19 @@ mod tests {
 
         let total = 25;
         let max = 13;
+
+        let result: Vec<_> =
+            select_1(coins.iter(), coins.iter().rev(), total, max, &mut rng).collect();
+        dbg!(&result);
+    }
+
+    #[test]
+    fn selection_algo_1() {
+        let coins = [15, 10, 8, 7, 6, 5, 4, 3, 2, 1];
+        let mut rng = rand::thread_rng();
+
+        let total = 25;
+        let max = 4;
 
         let result: Vec<_> =
             select_1(coins.iter(), coins.iter().rev(), total, max, &mut rng).collect();
