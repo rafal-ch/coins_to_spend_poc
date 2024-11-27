@@ -21,6 +21,7 @@ impl PartialEq for CoinIndexDef {
 }
 
 impl CoinIndexDef {
+    #[allow(dead_code)]
     fn new(user: String, asset: String, amount: u64, utxo_id: String) -> Self {
         Self {
             user,
@@ -47,12 +48,14 @@ struct CoinDef {
     metadata: String,
 }
 
+#[allow(dead_code)]
 struct CoinsManager {
     main_db: DB,
     index_db: DB,
 }
 
 #[derive(Debug)]
+#[allow(dead_code)]
 struct Query {
     asset: String,
     amount: u64,
@@ -75,6 +78,7 @@ impl FromStr for Query {
     }
 }
 
+#[allow(dead_code)]
 impl CoinsManager {
     fn new() -> Self {
         let mut main_options = Options::default();
@@ -124,7 +128,7 @@ impl CoinsManager {
         let suffix = utxo_id.to_string();
         let key = format!("{user_as_hex}{asset_as_hex}{serialized_amount_hex}{suffix}");
         //println!("Indexing: key={key} length={}", key.len());
-        self.index_db.put(key, &[]).unwrap();
+        self.index_db.put(key, []).unwrap();
     }
 
     fn iter<S, T>(&self, user: S, asset: T) -> impl Iterator<Item = CoinIndexDef> + '_
@@ -193,7 +197,7 @@ impl CoinsManager {
             .map(|(Query { amount, max, .. }, eligible_coins)| {
                 let mut value_accumulated = 0;
                 let mut coins_taken = 0;
-                let max = max.unwrap_or(std::u32::MAX) as usize;
+                let max = max.unwrap_or(u32::MAX) as usize;
                 let mut selected_coins: Vec<_> = eligible_coins
                     .iter()
                     .rev()
@@ -260,7 +264,7 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::{BTreeMap, BTreeSet};
+    use std::collections::BTreeSet;
 
     use itertools::Itertools;
     use rand::{rngs::ThreadRng, seq::SliceRandom, Rng};
@@ -439,7 +443,7 @@ mod tests {
 
             let cm = make_coin_manager(coins);
             let actual_coins: Vec<_> = cm.coins(owner, asset, NO_EXCLUDED_UTXO_IDS);
-            assert_coins(&expected_coins, &actual_coins, &cm.main_db);
+            assert_coins(expected_coins, &actual_coins, &cm.main_db);
         }
 
         const EXCLUDE_SINGLE_UTXO: TestCase = TestCase {
@@ -495,7 +499,7 @@ mod tests {
             let cm = make_coin_manager(coins);
             let actual_coins: Vec<_> = cm.coins(owner, asset, &excluded_utxo_ids);
 
-            assert_coins(&expected_coins, &actual_coins, &cm.main_db);
+            assert_coins(expected_coins, &actual_coins, &cm.main_db);
         }
     }
 
@@ -504,7 +508,7 @@ mod tests {
 
         use crate::{tests::assert_coins_to_spend, Query};
 
-        use super::{assert_coins, make_coin_manager, Coin, CoinDatabase, COIN_DATABASE};
+        use super::{make_coin_manager, Coin, CoinDatabase};
         use test_case::test_case;
 
         #[derive(Debug)]
@@ -852,7 +856,7 @@ mod tests {
             let cm = make_coin_manager(coins);
             let actual_coins: Vec<_> = cm.coins_to_spend(owner, &query, &excluded_utxo_ids);
 
-            assert_coins_to_spend(&expected_coins, &actual_coins, &cm.main_db);
+            assert_coins_to_spend(expected_coins, &actual_coins, &cm.main_db);
         }
     }
 
@@ -892,7 +896,7 @@ mod tests {
         assert_eq!(unique_metadata.len(), actual.len());
     }
 
-    fn assert_coins_to_spend(expected: &[Coin], actual: &[Vec<CoinIndexDef>], main_db: &DB) {
+    fn assert_coins_to_spend(expected: &[Coin], actual: &[Vec<CoinIndexDef>], _main_db: &DB) {
         let expected_grouped_by_asset = expected
             .iter()
             .map(Into::into)
@@ -901,80 +905,79 @@ mod tests {
 
         let actual_grouped_by_asset = actual
             .iter()
-            .map(|coins| coins.iter().cloned())
-            .flatten()
+            .flat_map(|coins| coins.iter().cloned())
             .into_group_map_by(|coin: &CoinIndexDef| coin.asset.clone());
         dbg!(&actual_grouped_by_asset);
 
         assert_eq!(expected_grouped_by_asset, actual_grouped_by_asset);
     }
 
-    fn select_coins<'a, I, J>(
-        mut smallest: I,
-        mut biggest: J,
-        total: u64,
-        max: u8,
-        rng: &mut ThreadRng,
-    ) -> Option<()>
-    where
-        I: Iterator<Item = &'a u64>,
-        J: Iterator<Item = &'a u64>,
-    {
-        let mut sum = 0;
-        let mut count = 0;
-        let big_end = loop {
-            let maybe_biggest_num = biggest.next();
-            match maybe_biggest_num {
-                Some(biggest_num) => {
-                    sum += biggest_num;
-                    count += 1;
-                    println!(
-                        "Added biggest: {}, total={}/{total}, count={}/{max}",
-                        biggest_num, sum, count
-                    );
-                    if sum >= total {
-                        break Some(biggest);
-                    }
-                }
-                None => break None,
-            }
-        };
+    // fn select_coins<'a, I, J>(
+    //     mut smallest: I,
+    //     mut biggest: J,
+    //     total: u64,
+    //     max: u8,
+    //     rng: &mut ThreadRng,
+    // ) -> Option<()>
+    // where
+    //     I: Iterator<Item = &'a u64>,
+    //     J: Iterator<Item = &'a u64>,
+    // {
+    //     let mut sum = 0;
+    //     let mut count = 0;
+    //     let big_end = loop {
+    //         let maybe_biggest_num = biggest.next();
+    //         match maybe_biggest_num {
+    //             Some(biggest_num) => {
+    //                 sum += biggest_num;
+    //                 count += 1;
+    //                 println!(
+    //                     "Added biggest: {}, total={}/{total}, count={}/{max}",
+    //                     biggest_num, sum, count
+    //                 );
+    //                 if sum >= total {
+    //                     break Some(biggest);
+    //                 }
+    //             }
+    //             None => break None,
+    //         }
+    //     };
 
-        if sum < total {
-            // Unable to satisfy the total amount with all coins.
-            return None;
-        }
+    //     if sum < total {
+    //         // Unable to satisfy the total amount with all coins.
+    //         return None;
+    //     }
 
-        let free_slots = max - count;
-        let to_be_filled_with_dust = rng.gen_range(2..free_slots);
-        println!(
-            "Free slots: {}. I will fill {} of them with dust",
-            free_slots, to_be_filled_with_dust
-        );
+    //     let free_slots = max - count;
+    //     let to_be_filled_with_dust = rng.gen_range(2..free_slots);
+    //     println!(
+    //         "Free slots: {}. I will fill {} of them with dust",
+    //         free_slots, to_be_filled_with_dust
+    //     );
 
-        let small_end = if to_be_filled_with_dust > 0 {
-            let mut dust_sum = 0;
-            let mut dust_count = 0;
-            loop {
-                let maybe_smallest_num = smallest.next();
-                match maybe_smallest_num {
-                    Some(smallest_num) => {
-                        dust_count += 1;
-                        dust_sum += smallest_num;
-                        println!("Added smallest: {}, total = {dust_sum}", smallest_num);
-                        if dust_count >= to_be_filled_with_dust {
-                            break Some(smallest);
-                        }
-                    }
-                    None => break None,
-                }
-            }
-        } else {
-            None
-        };
+    //     let small_end = if to_be_filled_with_dust > 0 {
+    //         let mut dust_sum = 0;
+    //         let mut dust_count = 0;
+    //         loop {
+    //             let maybe_smallest_num = smallest.next();
+    //             match maybe_smallest_num {
+    //                 Some(smallest_num) => {
+    //                     dust_count += 1;
+    //                     dust_sum += smallest_num;
+    //                     println!("Added smallest: {}, total = {dust_sum}", smallest_num);
+    //                     if dust_count >= to_be_filled_with_dust {
+    //                         break Some(smallest);
+    //                     }
+    //                 }
+    //                 None => break None,
+    //             }
+    //         }
+    //     } else {
+    //         None
+    //     };
 
-        todo!()
-    }
+    //     todo!()
+    // }
 
     // fn take_dust<'a, I>(mut coins_iter: I, stop_at: u64, max: u8) -> impl Iterator<Item = &'a u64>
     // where
@@ -1097,18 +1100,14 @@ mod tests {
                     None => false,
                 }
             })
-            .map(|&item| item)
+            .copied()
             .collect();
-        Box::new(
-            adjusted_big_coins
-                .into_iter()
-                .chain(small_coins.into_iter()),
-        )
+        Box::new(adjusted_big_coins.into_iter().chain(small_coins))
     }
 
     #[test]
     fn selection_algo_exact() {
-        let coins = vec![15, 10, 8, 7, 6, 5, 4, 3, 2, 1];
+        let coins = [15, 10, 8, 7, 6, 5, 4, 3, 2, 1];
         let mut rng = rand::thread_rng();
 
         let total = 61;
@@ -1121,7 +1120,7 @@ mod tests {
 
     #[test]
     fn selection_algo() {
-        let coins = vec![15, 10, 8, 7, 6, 5, 4, 3, 2, 1];
+        let coins = [15, 10, 8, 7, 6, 5, 4, 3, 2, 1];
         let mut rng = rand::thread_rng();
 
         let total = 25;
@@ -1134,7 +1133,7 @@ mod tests {
 
     #[test]
     fn selection_algo_can_not_satisfy() {
-        let coins = vec![15, 10, 8, 7, 6, 5, 4, 3, 2, 1];
+        let coins = [15, 10, 8, 7, 6, 5, 4, 3, 2, 1];
         let mut rng = rand::thread_rng();
 
         let total = 20000;
@@ -1147,7 +1146,7 @@ mod tests {
 
     #[test]
     fn selection_algo_no_coins() {
-        let coins = vec![];
+        let coins = [];
         let mut rng = rand::thread_rng();
 
         let total = 1;
