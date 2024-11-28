@@ -1039,6 +1039,7 @@ mod tests {
         coins_iter_back: J,
         total: u128,
         max: u8,
+        excluded: &[u64],
         rng: &mut ThreadRng,
     ) -> Box<dyn Iterator<Item = &'a u64> + 'a>
     where
@@ -1049,7 +1050,7 @@ mod tests {
             return Box::new(std::iter::empty());
         }
 
-        let (big_coins_total, big_coins) = big_coins(coins_iter, total, max);
+        let (big_coins_total, big_coins) = big_coins(coins_iter, total, max, excluded);
         if big_coins_total < total {
             return Box::new(std::iter::empty());
         }
@@ -1059,8 +1060,12 @@ mod tests {
         };
 
         let max_dust_count = max_dust_count(max, &big_coins, rng);
-        let (dust_coins_total, dust_coins) =
-            dust_coins(coins_iter_back, last_selected_big_coin, max_dust_count);
+        let (dust_coins_total, dust_coins) = dust_coins(
+            coins_iter_back,
+            last_selected_big_coin,
+            max_dust_count,
+            excluded,
+        );
 
         let retained_big_coins_iter = skip_big_coins_up_to_amount(big_coins, dust_coins_total);
         Box::new(retained_big_coins_iter.chain(dust_coins))
@@ -1085,12 +1090,14 @@ mod tests {
         coins_iter_back: I,
         last_big_coin: &'a u64,
         max_dust_count: u8,
+        excluded: &[u64],
     ) -> (u128, Vec<&'a u64>)
     where
         I: Iterator<Item = &'a u64> + 'a,
     {
         let mut dust_coins_total = 0;
         let dust_coins: Vec<&u64> = coins_iter_back
+            .filter(|item| !excluded.contains(item))
             .take(max_dust_count as usize)
             .take_while(move |item| *item != last_big_coin)
             .map(|item| {
@@ -1105,12 +1112,18 @@ mod tests {
         rng.gen_range(0..=max.saturating_sub(big_coins.len() as u8))
     }
 
-    fn big_coins<'a, I>(coins_iter: I, total: u128, max: u8) -> (u128, Vec<&'a u64>)
+    fn big_coins<'a, I>(
+        coins_iter: I,
+        total: u128,
+        max: u8,
+        excluded: &[u64],
+    ) -> (u128, Vec<&'a u64>)
     where
         I: Iterator<Item = &'a u64> + 'a,
     {
         let mut big_coins_total = 0;
         let big_coins: Vec<&u64> = coins_iter
+            .filter(|item| !excluded.contains(item))
             .take(max as usize)
             .take_while(|item| {
                 (big_coins_total >= total)
@@ -1131,9 +1144,17 @@ mod tests {
 
         let total = 61;
         let max = 10;
+        let excluded = [];
 
-        let result: Vec<_> =
-            select_1(coins.iter(), coins.iter().rev(), total, max, &mut rng).collect();
+        let result: Vec<_> = select_1(
+            coins.iter(),
+            coins.iter().rev(),
+            total,
+            max,
+            &excluded,
+            &mut rng,
+        )
+        .collect();
         dbg!(&result);
     }
 
@@ -1143,10 +1164,18 @@ mod tests {
         let mut rng = rand::thread_rng();
 
         let total = 25;
-        let max = 13;
+        let max = 7;
+        let excluded = [1, 2, 10];
 
-        let result: Vec<_> =
-            select_1(coins.iter(), coins.iter().rev(), total, max, &mut rng).collect();
+        let result: Vec<_> = select_1(
+            coins.iter(),
+            coins.iter().rev(),
+            total,
+            max,
+            &excluded,
+            &mut rng,
+        )
+        .collect();
         dbg!(&result);
     }
 
@@ -1157,9 +1186,17 @@ mod tests {
 
         let total = 25;
         let max = 4;
+        let excluded = [];
 
-        let result: Vec<_> =
-            select_1(coins.iter(), coins.iter().rev(), total, max, &mut rng).collect();
+        let result: Vec<_> = select_1(
+            coins.iter(),
+            coins.iter().rev(),
+            total,
+            max,
+            &excluded,
+            &mut rng,
+        )
+        .collect();
         dbg!(&result);
     }
 
@@ -1170,9 +1207,17 @@ mod tests {
 
         let total = 20000;
         let max = 13;
+        let excluded = [];
 
-        let result: Vec<_> =
-            select_1(coins.iter(), coins.iter().rev(), total, max, &mut rng).collect();
+        let result: Vec<_> = select_1(
+            coins.iter(),
+            coins.iter().rev(),
+            total,
+            max,
+            &excluded,
+            &mut rng,
+        )
+        .collect();
         dbg!(&result);
     }
 
@@ -1183,9 +1228,88 @@ mod tests {
 
         let total = 1;
         let max = 13;
+        let excluded = [];
 
-        let result: Vec<_> =
-            select_1(coins.iter(), coins.iter().rev(), total, max, &mut rng).collect();
+        let result: Vec<_> = select_1(
+            coins.iter(),
+            coins.iter().rev(),
+            total,
+            max,
+            &excluded,
+            &mut rng,
+        )
+        .collect();
         dbg!(&result);
+    }
+
+    fn find_subset_sum<'a>(
+        coins: impl Iterator<Item = &'a u64>,
+        target: u64,
+        max: u8,
+        rng: &mut ThreadRng,
+    ) -> (impl Iterator<Item = &'a u64>, impl Iterator<Item = &'a u64>) {
+        // Accumulate sum of first elements
+        let mut current_sum = 0;
+
+        let mut big = Vec::with_capacity(max as usize);
+        let mut dust = Vec::with_capacity(max as usize);
+        let mut switched = false;
+        let mut dust_value = 0;
+        let mut dust_count = 0;
+        let mut max_dust_count = 0;
+        let mut last_big = 0;
+
+        for coin in coins.take(max as usize) {
+            current_sum += coin;
+            if switched {
+                if dust_count == max_dust_count || coin == &last_big {
+                    break;
+                }
+                dust_value += coin;
+                dust_count += 1;
+                dust.push(coin);
+            } else {
+                big.push(coin);
+                if current_sum >= target {
+                    switched = true;
+                    last_big = *coin;
+                    max_dust_count = rng.gen_range(0..=max as usize - big.len());
+                }
+            }
+        }
+
+        (
+            dust.into_iter().rev(),
+            big.into_iter().take(max as usize).skip_while(move |item| {
+                dust_value
+                    .checked_sub(**item)
+                    .and_then(|new_value| {
+                        dust_value = new_value;
+                        Some(true)
+                    })
+                    .unwrap_or_default()
+            }),
+        )
+    }
+
+    #[test]
+    fn selection_algo_partition() {
+        let mut rng = rand::thread_rng();
+
+        let coins = [15, 10, 8, 7, 6, 5, 4, 3, 2, 1];
+
+        let total = 25;
+        let max = 7;
+
+        let (dust_iter, big_iter) = find_subset_sum(coins.iter(), total, max, &mut rng);
+
+        let dust: Vec<_> = dust_iter.take(max as usize).collect();
+        let big: Vec<_> = big_iter.collect();
+
+        println!("Big coins: {:?}", big.iter().join(","));
+        println!("Dust coins: {:?}", dust.iter().join(","));
+
+        let total_selected_value = big.into_iter().chain(dust).sum::<u64>();
+        println!("Total selected value: {}", total_selected_value);
     }
 }
